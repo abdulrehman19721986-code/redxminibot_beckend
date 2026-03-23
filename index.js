@@ -1,546 +1,936 @@
+'use strict';
 /**
- * ╔══════════════════════════════════════════╗
- * ║   🔥 REDXBOT302 - Backend v6.0 FINAL 🔥  ║
- * ║   Arslan MD Architecture | Pair-Only     ║
- * ╚══════════════════════════════════════════╝
+ * 🔥 REDXBOT302 MINI — FINAL EDITION v5.0
+ * Per-number sessions · User Deploy Keys · Admin Panel · Arslan-MD plugins
+ * Owner: Abdul Rehman Rajpoot (+923009842133)
  */
 
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
+const express  = require('express');
+const cors     = require('cors');
+const http     = require('http');
+const socketIo = require('socket.io');
+const path     = require('path');
+const fs       = require('fs');
+const crypto   = require('crypto');
+require('dotenv').config();
+
 const {
-  makeWASocket, useMultiFileAuthState, DisconnectReason,
-  fetchLatestBaileysVersion
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers,
 } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
-const pino = require('pino');
-const crypto = require('crypto');
-const bodyParser = require('body-parser');
+const P = require('pino');
 
-const app = express();
+// ── APP ─────────────────────────────────────────────────────
+const app    = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } });
+const io     = socketIo(server, { cors: { origin: '*' } });
+const PORT   = process.env.PORT || 3000;
+const START_TIME = Date.now();
 
-app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors({ origin: '*', methods: ['GET','POST','DELETE','PUT','OPTIONS'], allowedHeaders: ['Content-Type','x-admin-token','x-deploy-key'] }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PORT = process.env.PORT || 3000;
-const SESSIONS_DIR = path.join(__dirname, 'sessions');
-const DATA_DIR = path.join(__dirname, 'data');
-const DEPLOYS_FILE = path.join(__dirname, 'data', 'deploys.json');
+// ── CONFIG ──────────────────────────────────────────────────
+const BOT_NAME     = process.env.BOT_NAME     || '🔥 REDXBOT302 🔥';
+const OWNER_NAME   = process.env.OWNER_NAME   || 'Abdul Rehman Rajpoot';
+const OWNER_NUM    = process.env.OWNER_NUMBER || '923009842133';
+const CO_OWNER     = process.env.CO_OWNER     || 'Muzamil Khan';
+const CO_OWNER_NUM = process.env.CO_OWNER_NUM || '923183928892';
+const PREFIX       = process.env.PREFIX       || '.';
+const BOT_IMG      = process.env.MENU_IMAGE   || 'https://files.catbox.moe/s36b12.jpg';
+const REPO_LINK    = process.env.REPO_LINK    || 'https://github.com/AbdulRehman19721986/REDXBOT-MD';
+const NL_JID       = process.env.NEWSLETTER_JID || '120363405513439052@newsletter';
+const NL_NAME      = '🔥 REDXBOT302 🔥';
+const WA_GROUP     = 'https://chat.whatsapp.com/LhSmx2SeXX75r8I2bxsNDo';
+const TG_GROUP     = 'https://t.me/TeamRedxhacker2';
+global.BOT_MODE    = process.env.BOT_MODE || 'public';
+
+let adminUsername = process.env.ADMIN_USERNAME || 'redx';
+let adminPassword = process.env.ADMIN_PASSWORD || 'redx';
+const adminSessions = new Map(); // token → { user, ts }
+
+// ── PATHS ────────────────────────────────────────────────────
+const SESSIONS_DIR   = path.join(__dirname, 'sessions');
+const DATA_FILE      = path.join(__dirname, 'data.json');
+const DEPLOYS_FILE   = path.join(__dirname, 'deploys.json');
+const SERVERS_FILE   = path.join(__dirname, 'servers.json');
 const DEPLOY_ID_FILE = path.join(__dirname, 'deploy_id.txt');
 
-// ── CONFIG ────────────────────────────────────────────────────────────────────
-const CONFIG = {
-  BOT_NAME:     process.env.BOT_NAME     || '🔥 REDXBOT302 🔥',
-  OWNER_NAME:   process.env.OWNER_NAME   || 'Abdul Rehman Rajpoot',
-  OWNER_NUMBER: process.env.OWNER_NUMBER || '923183928892',
-  CO_OWNER:     process.env.CO_OWNER     || 'Muzamil Khan',
-  PREFIX:       process.env.PREFIX       || '.',
-  MODE:         process.env.MODE         || 'PUBLIC',
-  ADMIN_USER:   process.env.ADMIN_USER   || 'redx',
-  ADMIN_PASS:   process.env.ADMIN_PASS   || 'redx',
-  get PLATFORM() {
-    return process.env.RAILWAY_ENVIRONMENT ? 'Railway'
-      : process.env.DYNO ? 'Heroku'
-      : process.env.RENDER ? 'Render'
-      : 'Local';
-  }
+[SESSIONS_DIR, path.join(__dirname,'temp'), path.join(__dirname,'data')].forEach(d => {
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+});
+
+// ── DEPLOY ID (this server's unique ID) ─────────────────────
+const DEPLOY_ID = (() => {
+  if (fs.existsSync(DEPLOY_ID_FILE)) return fs.readFileSync(DEPLOY_ID_FILE,'utf8').trim();
+  const id = process.env.DEPLOY_ID || ('REDX-' + crypto.randomBytes(4).toString('hex').toUpperCase());
+  fs.writeFileSync(DEPLOY_ID_FILE, id);
+  return id;
+})();
+
+const detectPlatform = () => {
+  if (process.env.DYNO)                return 'Heroku';
+  if (process.env.RAILWAY_ENVIRONMENT) return 'Railway';
+  if (process.env.RENDER)              return 'Render';
+  return 'Local';
 };
 
-// Sync settings.js with runtime config
-const settingsPath = path.join(__dirname, 'settings.js');
-function syncSettings() {
-  const content = `module.exports = {
-  botName: process.env.BOT_NAME || '${CONFIG.BOT_NAME}',
-  botOwner: process.env.OWNER_NAME || '${CONFIG.OWNER_NAME}',
-  ownerNumber: process.env.OWNER_NUMBER || '${CONFIG.OWNER_NUMBER}',
-  coOwner: process.env.CO_OWNER || '${CONFIG.CO_OWNER}',
-  prefix: process.env.PREFIX || '${CONFIG.PREFIX}',
-  mode: process.env.MODE || '${CONFIG.MODE}',
-};\n`;
-  try { fs.writeFileSync(settingsPath, content); } catch {}
+// ── PERSISTENT DATA ──────────────────────────────────────────
+let statsData = { totalUsers: 0, pairCount: 0 };
+const loadStats = () => { try { if (fs.existsSync(DATA_FILE)) statsData = { ...statsData, ...JSON.parse(fs.readFileSync(DATA_FILE,'utf8')) }; } catch {} };
+const saveStats = () => { try { fs.writeFileSync(DATA_FILE, JSON.stringify({ ...statsData, lastUpdated: new Date().toISOString() },null,2)); } catch {} };
+loadStats(); setInterval(saveStats, 30000);
+
+// ── DEPLOYS REGISTRY ─────────────────────────────────────────
+// Each deploy record: { id, platform, createdAt, numbers[], pairCount, lastSeen, botName, prefix, mode, ownerName, deployKey }
+let deploys = {};
+const loadDeploys = () => { try { if (fs.existsSync(DEPLOYS_FILE)) deploys = JSON.parse(fs.readFileSync(DEPLOYS_FILE,'utf8')); } catch {} };
+const saveDeploys = () => { try { fs.writeFileSync(DEPLOYS_FILE, JSON.stringify(deploys,null,2)); } catch {} };
+loadDeploys();
+
+// Ensure this deploy exists with a deploy key
+if (!deploys[DEPLOY_ID]) {
+  deploys[DEPLOY_ID] = {
+    id: DEPLOY_ID,
+    platform: detectPlatform(),
+    createdAt: new Date().toISOString(),
+    numbers: [],
+    pairCount: 0,
+    // User-configurable fields
+    botName: BOT_NAME,
+    ownerName: OWNER_NAME,
+    prefix: PREFIX,
+    mode: global.BOT_MODE,
+    // Security: unique key only this deploy owner knows
+    deployKey: crypto.randomBytes(16).toString('hex'),
+  };
 }
-syncSettings();
+deploys[DEPLOY_ID].lastSeen = new Date().toISOString();
+deploys[DEPLOY_ID].platform = detectPlatform();
+saveDeploys();
 
-// ── DEPLOY ID ────────────────────────────────────────────────────────────────
-let DEPLOY_ID = process.env.DEPLOY_ID || '';
-if (!DEPLOY_ID) {
-  if (fs.existsSync(DEPLOY_ID_FILE)) {
-    DEPLOY_ID = fs.readFileSync(DEPLOY_ID_FILE, 'utf8').trim();
-  } else {
-    DEPLOY_ID = 'REDX-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-    fs.writeFileSync(DEPLOY_ID_FILE, DEPLOY_ID);
-  }
-}
+let servers = [];
+const loadServers = () => { try { if (fs.existsSync(SERVERS_FILE)) servers = JSON.parse(fs.readFileSync(SERVERS_FILE,'utf8')); } catch {} };
+const saveServers = () => { try { fs.writeFileSync(SERVERS_FILE, JSON.stringify(servers,null,2)); } catch {} };
+loadServers();
 
-// ── DATA STORE ────────────────────────────────────────────────────────────────
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+// ── ACTIVE CONNECTIONS (per number — Arslan MD style) ────────
+const activeConnections = new Map();
 
-function loadDeploys() {
-  try { return fs.existsSync(DEPLOYS_FILE) ? JSON.parse(fs.readFileSync(DEPLOYS_FILE, 'utf8')) : {}; }
-  catch { return {}; }
-}
-function saveDeploys(d) { fs.writeFileSync(DEPLOYS_FILE, JSON.stringify(d, null, 2)); }
-let deploys = loadDeploys();
+const broadcastStats = () => {
+  const connected = [...activeConnections.values()].filter(c=>c.connected).length;
+  io.emit('statsUpdate', { activeSockets: connected, totalUsers: statsData.totalUsers, pairCount: statsData.pairCount });
+};
 
-const stats = { totalPairs: 0, totalMessages: 0, startTime: Date.now() };
-
-// ── SESSION MANAGEMENT ────────────────────────────────────────────────────────
-const activeSessions = {}; // number -> { sock, status, reconnectAttempts }
-
-function generateDeployKey() {
-  return 'RDXKEY-' + crypto.randomBytes(8).toString('hex').toUpperCase();
-}
-
-// ── PLUGIN LOADER ─────────────────────────────────────────────────────────────
-const allPlugins = []; // { commands, aliases, handler, category }
-
-function loadAllPlugins() {
-  const pluginDir = path.join(__dirname, 'plugins');
-  const files = fs.readdirSync(pluginDir).filter(f => f.endsWith('.js'));
-  let total = 0;
+// ── PLUGINS ──────────────────────────────────────────────────
+const commands   = new Map();
+const pluginsDir = path.join(__dirname, 'plugins');
+let cmdCount     = 0;
+const loadPlugins = () => {
+  commands.clear(); cmdCount = 0;
+  if (!fs.existsSync(pluginsDir)) { fs.mkdirSync(pluginsDir,{recursive:true}); return; }
+  const files = fs.readdirSync(pluginsDir).filter(f=>f.endsWith('.js')&&!f.startsWith('.'));
 
   for (const file of files) {
     try {
-      delete require.cache[require.resolve(path.join(pluginDir, file))];
-      const loaded = require(path.join(pluginDir, file));
+      const fp = path.join(pluginsDir, file);
+      delete require.cache[require.resolve(fp)];
+      const mod = require(fp);
 
-      // Support both single export and array export
-      const pluginList = Array.isArray(loaded) ? loaded : [loaded];
+      // normalise() converts any plugin style into the internal {pattern, execute} format.
+      // Supports:
+      //   Style A (original): { pattern, execute, alias[] }
+      //   Style B (new):      { command, handler, aliases[] }
+      //   Both can be single objects OR arrays of objects.
+      const normalise = (raw) => {
+        if (!raw || typeof raw !== 'object') return null;
+        // Style A — already has pattern+execute
+        if (raw.pattern && raw.execute) return raw;
+        // Style B — has command+handler
+        if ((raw.command || raw.pattern) && (raw.handler || raw.execute)) {
+          const pattern = raw.command || raw.pattern;
+          const execute = raw.handler
+            ? async (conn, msg, m, opts) => {
+                // Bridge: call handler(sock, message, args, context)
+                const context = {
+                  chatId: opts.from,
+                  command: pattern,
+                  config: {
+                    BOT_NAME, OWNER_NAME, OWNER_NUM, PREFIX,
+                    BOT_MODE: global.BOT_MODE, CO_OWNER, CO_OWNER_NUM,
+                  },
+                  deployId: DEPLOY_ID,
+                  channelInfo: {
+                    contextInfo: {
+                      forwardingScore: 999, isForwarded: true,
+                      forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: NL_NAME, serverMessageId: -1 },
+                    }
+                  },
+                  ...opts,
+                };
+                return raw.handler(conn, msg, opts.args || [], context);
+              }
+            : raw.execute;
+          return {
+            ...raw,
+            pattern,
+            execute,
+            alias: raw.aliases || raw.alias || [],
+            category: raw.category || 'other',
+            desc: raw.description || raw.desc || '',
+          };
+        }
+        return null;
+      };
 
-      for (const plugin of pluginList) {
-        if (!plugin.command || !plugin.handler) continue;
-        const cmds = [plugin.command, ...(plugin.aliases || [])].map(c => c.toLowerCase());
-        allPlugins.push({ cmds, handler: plugin.handler, category: plugin.category || 'misc', desc: plugin.description || '', usage: plugin.usage || '' });
-        total++;
+      const reg = (raw) => {
+        const cmd = normalise(raw);
+        if (!cmd) return;
+        commands.set(cmd.pattern, cmd); cmdCount++;
+        const aliases = Array.isArray(cmd.alias) ? cmd.alias : [];
+        aliases.forEach(a => { if(a) commands.set(a, cmd); });
+      };
+
+      if (Array.isArray(mod)) {
+        mod.forEach(reg);
+      } else if (mod && typeof mod === 'object') {
+        // Could be single plugin or object of plugins
+        const n = normalise(mod);
+        if (n) {
+          reg(mod);
+        } else {
+          Object.values(mod).forEach(v => { if(v && typeof v === 'object') reg(v); });
+        }
       }
-    } catch (e) {
-      console.error(`[PLUGIN ERROR] ${file}: ${e.message}`);
-    }
+    } catch(e){ console.error(`Plugin ${file}: ${e.message?.slice(0,120)}`); }
   }
-  console.log(`[REDX] ✅ Loaded ${total} commands from ${files.length} plugin files`);
-  return total;
-}
+  console.log(`🔌 ${cmdCount} commands loaded from ${files.length} plugin files`);
+};
+loadPlugins();
+if (fs.existsSync(pluginsDir)) fs.watch(pluginsDir,(e,f)=>{ if(f&&f.endsWith('.js')){ console.log(`♻️ Reloading ${f}`); loadPlugins(); } });
 
-function getPlugin(cmdName) {
-  return allPlugins.find(p => p.cmds.includes(cmdName.toLowerCase()));
-}
-
-// ── CONNECT NUMBER (Arslan MD Architecture) ───────────────────────────────────
-async function connectNumber(number) {
+// ════════════════════════════════════════════════════════════
+//  initConnection — Arslan MD per-number architecture
+// ════════════════════════════════════════════════════════════
+async function initConnection(number) {
   const sessionDir = path.join(SESSIONS_DIR, number);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
+  const { version }          = await fetchLatestBaileysVersion();
 
-  const sock = makeWASocket({
+  const conn = makeWASocket({
     version,
-    logger: pino({ level: 'silent' }),
+    logger: P({ level: 'silent' }),
     printQRInTerminal: false,
     auth: state,
-    connectTimeoutMs: 60000,
+    browser: Browsers.macOS('Safari'),
+    connectTimeoutMs:      30000,
+    keepAliveIntervalMs:   10000,
     defaultQueryTimeoutMs: 30000,
-    keepAliveIntervalMs: 25000,
-    browser: ['REDXBOT302', 'Chrome', '4.0.0'],
-    generateHighQualityLinkPreview: true,
-    syncFullHistory: false,
-    markOnlineOnConnect: true,
+    retryRequestDelayMs:   250,
+    maxRetries:            5,
+    markOnlineOnConnect:   true,
+    syncFullHistory:       false,
   });
 
-  activeSessions[number] = { sock, status: 'connecting', number, reconnectAttempts: 0 };
-  io.emit('bot_status', { number, status: 'connecting' });
+  const prev = activeConnections.get(number) || {};
+  activeConnections.set(number, { conn, saveCreds, connected: false, hasWelcomed: prev.hasWelcomed||false, reconnectAttempts: prev.reconnectAttempts||0 });
 
-  // Wait for socket registration before requesting code (Arslan MD uses 3s)
-  await new Promise(r => setTimeout(r, 2000));
+  setupHandlers(conn, number, saveCreds);
+  return conn;
+}
 
-  let pairCode = null;
-  if (!sock.authState.creds.registered) {
-    const cleanNum = number.replace(/[^0-9]/g, '');
-    try {
-      pairCode = await sock.requestPairingCode(cleanNum);
-      pairCode = pairCode?.match(/.{1,4}/g)?.join('-') || pairCode;
-      console.log(`[REDX] 📱 Pair code for ${number}: ${pairCode}`);
-      io.emit('pair_code', { number, code: pairCode });
-    } catch (err) {
-      console.error(`[REDX] Pair code error: ${err.message}`);
-      if (activeSessions[number]) delete activeSessions[number];
-      try { sock.end(); } catch {}
-      throw new Error('Failed to get pairing code: ' + err.message);
-    }
-  }
+// ════════════════════════════════════════════════════════════
+//  setupHandlers — exact Arslan MD sequence
+// ════════════════════════════════════════════════════════════
+function setupHandlers(conn, number, saveCreds) {
+  const entry = activeConnections.get(number);
 
-  // ── CONNECTION EVENTS ─────────────────────────────────────────────────────
-  sock.ev.on('connection.update', async (update) => {
+  conn.ev.on('creds.update', async () => { try { await saveCreds(); } catch {} });
+
+  conn.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
+    console.log(`[${number}] ${connection}`);
 
     if (connection === 'open') {
-      console.log(`[REDX] ✅ Bot connected: ${number}`);
-      activeSessions[number] = { ...activeSessions[number], status: 'connected', reconnectAttempts: 0 };
-      stats.totalPairs++;
+      entry.connected = true;
+      entry.reconnectAttempts = 0;
+      statsData.pairCount++;
+      statsData.totalUsers++;
+      saveStats();
 
-      // Save deployment
-      const deployKey = deploys[number]?.key || generateDeployKey();
-      deploys[number] = {
-        number, deployId: DEPLOY_ID, key: deployKey,
-        platform: CONFIG.PLATFORM, connectedAt: new Date().toISOString(),
-        status: 'connected', botName: CONFIG.BOT_NAME,
-        owner: CONFIG.OWNER_NAME, prefix: CONFIG.PREFIX, mode: CONFIG.MODE,
-      };
-      saveDeploys(deploys);
-      io.emit('bot_status', { number, status: 'connected', deployId: DEPLOY_ID });
+      const dep = deploys[DEPLOY_ID];
+      if (!dep.numbers.includes(number)) dep.numbers.push(number);
+      dep.pairCount = (dep.pairCount||0)+1;
+      dep.lastPaired = new Date().toISOString();
+      saveDeploys();
 
-      // Send professional welcome message
-      try {
-        await new Promise(r => setTimeout(r, 2000));
+      broadcastStats();
+      io.emit('linked',    { sessionId: number, number });
+      io.emit('botStatus', { connected: true, number, deployId: DEPLOY_ID, platform: detectPlatform() });
+      console.log(`✅ [${number}] CONNECTED — ${BOT_NAME}`);
 
-        const totalCmds = allPlugins.length;
-
-        const welcomeMsg =
-`*╔══════════════════════════╗*
-*║  🔥  REDXBOT302  🔥  ║*
-*╚══════════════════════════╝*
-
-✅ *Bot Connected Successfully!*
-
-🤖 *Bot:* ${CONFIG.BOT_NAME}
-👑 *Owner:* ${CONFIG.OWNER_NAME}
-👤 *Co-Owner:* ${CONFIG.CO_OWNER}
-📌 *Prefix:* \`${CONFIG.PREFIX}\`
-🌍 *Mode:* ${CONFIG.MODE}
-📦 *Commands:* ${totalCmds}+
-🆔 *Deploy ID:* \`${DEPLOY_ID}\`
-📡 *Platform:* ${CONFIG.PLATFORM}
-
-🚀 _Type ${CONFIG.PREFIX}menu to see all ${totalCmds}+ commands!_
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌐 GitHub: github.com/AbdulRehman19721986/redxbot302
-💬 WhatsApp Channel: wa.me/channel/0029VbCPnYf96H4SNehkev10`;
-
-        await sock.sendMessage(number + '@s.whatsapp.net', {
-          text: welcomeMsg,
-          contextInfo: {
-            forwardingScore: 1, isForwarded: true,
-            forwardedNewsletterMessageInfo: {
-              newsletterJid: '120363405513439052@newsletter',
-              newsletterName: 'REDXBOT302', serverMessageId: -1
-            }
-          }
-        });
-
-        // Send secret key in second message
-        await new Promise(r => setTimeout(r, 1500));
-        await sock.sendMessage(number + '@s.whatsapp.net', {
-          text: `🔑 *Your Secret Deploy Key*\n\n\`\`\`${deployKey}\`\`\`\n\n⚠️ *KEEP THIS PRIVATE — Don't share with anyone!*\n\n📋 *How to use:*\n1. Go to the bot website dashboard\n2. Click "My Dashboard"\n3. Enter this key\n4. You can then:\n   • View your bot status\n   • Edit bot name/prefix/mode\n   • Restart or delete your bot\n\n🌐 _Save this key safely!_`
-        });
-      } catch (e) {
-        console.error('[REDX] Welcome msg error:', e.message);
+      if (!entry.hasWelcomed) {
+        entry.hasWelcomed = true;
+        setTimeout(() => sendWelcome(conn, number).catch(()=>{}), 3000);
       }
     }
 
     if (connection === 'close') {
-      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      const noRetry = [DisconnectReason.loggedOut, 401, 405, 403];
-      console.log(`[REDX] Connection closed for ${number}. Reason: ${reason}`);
+      entry.connected = false;
+      broadcastStats();
+      io.emit('botStatus', { connected: false, number });
 
-      if (noRetry.includes(reason)) {
-        console.log(`[REDX] Session logged out: ${number}`);
-        delete activeSessions[number];
-        if (deploys[number]) { deploys[number].status = 'disconnected'; saveDeploys(deploys); }
-        io.emit('bot_status', { number, status: 'disconnected' });
-        try { fs.rmSync(path.join(SESSIONS_DIR, number), { recursive: true, force: true }); } catch {}
+      const code        = lastDisconnect?.error?.output?.statusCode;
+      const isLoggedOut = code === DisconnectReason.loggedOut || code === 401 || code === 405;
+      console.log(`❌ [${number}] closed code=${code}`);
+
+      if (isLoggedOut) {
+        console.log(`🗑️  [${number}] logout — deleting session`);
+        try { fs.rmSync(path.join(SESSIONS_DIR,number),{recursive:true,force:true}); } catch {}
+        activeConnections.delete(number);
+        io.emit('unlinked', { sessionId: number, number });
+        return;
+      }
+
+      if (entry.reconnectAttempts < 10) {
+        entry.reconnectAttempts++;
+        const wait = Math.min(3000*entry.reconnectAttempts, 20000);
+        console.log(`🔄 [${number}] reconnect in ${wait/1000}s (${entry.reconnectAttempts}/10)`);
+        setTimeout(async () => {
+          try { conn.ev.removeAllListeners(); try{conn.ws?.terminate();}catch{}; await initConnection(number); }
+          catch(e){ console.error(`Reconnect ${number}: ${e.message}`); }
+        }, wait);
       } else {
-        const attempts = (activeSessions[number]?.reconnectAttempts || 0) + 1;
-        const delay = Math.min(5000 * attempts, 30000);
-        console.log(`[REDX] Reconnecting ${number} in ${delay}ms (attempt ${attempts})`);
-        if (activeSessions[number]) activeSessions[number].status = 'reconnecting';
-        io.emit('bot_status', { number, status: 'reconnecting' });
-        setTimeout(() => connectNumber(number).catch(console.error), delay);
+        activeConnections.delete(number);
+        io.emit('unlinked', { sessionId: number, number });
       }
     }
   });
 
-  sock.ev.on('creds.update', saveCreds);
-
-  // ── MESSAGE HANDLER ──────────────────────────────────────────────────────
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  conn.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
-      stats.totalMessages++;
-
-      const body =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        msg.message?.imageMessage?.caption ||
-        msg.message?.videoMessage?.caption || '';
-
-      if (!body.startsWith(CONFIG.PREFIX)) continue;
-
-      const parts = body.trim().slice(CONFIG.PREFIX.length).split(/\s+/);
-      const cmdName = parts[0].toLowerCase();
-      const args = parts.slice(1);
-
-      const plugin = getPlugin(cmdName);
-      if (!plugin) continue;
-
-      const chatId = msg.key.remoteJid;
-      try {
-        await plugin.handler(sock, msg, args, {
-          chatId, config: CONFIG, deployId: DEPLOY_ID,
-          command: cmdName,
-          channelInfo: {
-            contextInfo: {
-              forwardingScore: 1, isForwarded: true,
-              forwardedNewsletterMessageInfo: {
-                newsletterJid: '120363405513439052@newsletter',
-                newsletterName: 'REDXBOT302', serverMessageId: -1
-              }
-            }
-          }
-        });
-      } catch (e) {
-        console.error(`[PLUGIN ERROR] ${cmdName}: ${e.message}`);
-      }
+      try { await handleMessage(conn, msg, number); } catch(e){ console.error(`msg: ${e.message}`); }
     }
   });
 
-  return { pairCode, deployId: DEPLOY_ID };
+  // Welcome / goodbye group events
+  conn.ev.on('group-participants.update', async (update) => {
+    try {
+      const GroupEvents = require('./lib/groupevents');
+      await GroupEvents(conn, update, {
+        botName: BOT_NAME, ownerName: OWNER_NAME,
+        menuImage: BOT_IMG, newsletterJid: NL_JID,
+      });
+    } catch(e){ console.error('GroupEvents:', e.message); }
+  });
 }
 
-// ── RELOAD EXISTING SESSIONS ──────────────────────────────────────────────────
-async function reloadSessions() {
+// ════════════════════════════════════════════════════════════
+//  PROFESSIONAL WELCOME (Arslan MD style)
+// ════════════════════════════════════════════════════════════
+async function sendWelcome(conn, number) {
+  const userJid = `${number}@s.whatsapp.net`;
+  let name = 'User';
+  try { name = conn.user?.name || conn.user?.notify || 'User'; } catch {}
+  const dep = deploys[DEPLOY_ID];
+
+  const text = `╭━[ \`🔥 ${BOT_NAME}\` ]━⊷
+┆⚜️ *DEV:* ☛ _+${OWNER_NUM}_
+╰━━━━━━━━━━⊷
+
+👋 Hey *${name}* 🤩
+🎉 *Pairing Completed — You're good to go!*
+
+_ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302_
+
+📱 *Number:* +${number}
+🆔 *Deploy ID:* \`${DEPLOY_ID}\`
+🔑 *Your Deploy Key:* \`${dep.deployKey}\`
+🌐 *Platform:* ${detectPlatform()}
+👑 *Owner:* ${OWNER_NAME}
+📦 *Commands:* ${cmdCount+8}+
+📌 *Prefix:* ${dep.prefix||PREFIX}
+🌍 *Mode:* ${global.BOT_MODE.toUpperCase()}
+
+> 🔒 Keep your Deploy Key private!
+> Use it on the website to manage your bot.
+> Type *${dep.prefix||PREFIX}menu* to see all commands!
+
+🍴 Fork & ⭐ Star: ${REPO_LINK}
+
+> 🔥 ${BOT_NAME} — By ${OWNER_NAME}`;
+
+  await conn.sendMessage(userJid, {
+    text,
+    contextInfo: {
+      forwardingScore: 999,
+      isForwarded: true,
+      forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: NL_NAME, serverMessageId: -1 },
+      externalAdReply: {
+        title: `${BOT_NAME} Connected 🚀`,
+        body: `Deploy ID: ${DEPLOY_ID}`,
+        thumbnailUrl: BOT_IMG,
+        sourceUrl: REPO_LINK,
+        mediaType: 1,
+        renderLargerThumbnail: true,
+      },
+    },
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  MESSAGE HANDLER
+// ════════════════════════════════════════════════════════════
+async function handleMessage(conn, msg, sessionId) {
+  const from    = msg.key.remoteJid;
+  const sender  = msg.key.participant || msg.key.remoteJid;
+  const sNum    = sender.split('@')[0].split(':')[0];
+  const isOwner = sNum === OWNER_NUM || sNum === CO_OWNER_NUM || sNum === sessionId;
+
+  if (from === 'status@broadcast') {
+    if (process.env.AUTO_STATUS_SEEN !== 'false') await conn.readMessages([msg.key]).catch(()=>{});
+    if (process.env.AUTO_STATUS_REACT !== 'false') {
+      const e=['🔥','⚡','💯','👑','🚀','💎','❤️','💜','✨','🌟'][Math.floor(Math.random()*10)];
+      await conn.sendMessage(from,{react:{text:e,key:msg.key}},{statusJidList:[sender,conn.user.id]}).catch(()=>{});
+    }
+    return;
+  }
+  if (from?.endsWith('@newsletter')) return;
+  if (!msg.message) return;
+  if (global.BOT_MODE === 'private' && !isOwner) return;
+
+  const body = msg.message?.conversation
+    || msg.message?.extendedTextMessage?.text
+    || msg.message?.imageMessage?.caption
+    || msg.message?.videoMessage?.caption || '';
+
+  const dep    = deploys[DEPLOY_ID];
+  const pfx    = dep?.prefix || PREFIX;
+  if (!body.startsWith(pfx)) return;
+
+  const args = body.slice(pfx.length).trim().split(/ +/);
+  const cmd  = args.shift().toLowerCase();
+  const q    = body.slice(pfx.length + cmd.length).trim();
+
+  console.log(`[${new Date().toLocaleTimeString()}] ${pfx}${cmd} | ${sNum}`);
+
+  if (await runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, pfx)) return;
+
+  if (commands.has(cmd)) {
+    const plugin = commands.get(cmd);
+    try {
+      const reply   = (text, opts={}) => conn.sendMessage(from,{text},{quoted:msg,...opts});
+      const isGroup = from.endsWith('@g.us');
+      let gMeta = null;
+      if (isGroup) { try { gMeta = await conn.groupMetadata(from); } catch {} }
+      let isAdmin = false;
+      if (isGroup && gMeta) { const p = gMeta.participants.find(p=>p.id===sender); isAdmin = p?.admin==='admin'||p?.admin==='superadmin'; }
+      const quoted = getQuoted(msg);
+      // Pass full opts — the normalise() bridge in loadPlugins uses these for new-style plugins
+      const pluginOpts = {
+        args, q, reply, from, isGroup, groupMetadata: gMeta,
+        sender, isAdmin, isOwner, botName: BOT_NAME, ownerName: OWNER_NAME,
+        prefix: pfx, senderNumber: sNum,
+        // new-style context fields (used directly by bridge)
+        chatId: from, deployId: DEPLOY_ID,
+      };
+      await plugin.execute(conn, msg, {
+        mentionedJid: msg.message?.extendedTextMessage?.contextInfo?.mentionedJid||[],
+        quoted, sender, key: msg.key,
+        message: msg.message,
+      }, pluginOpts);
+    } catch(e){ console.error(`cmd[${cmd}]: ${e.message}`); }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  BUILT-IN COMMANDS — Professional Arslan MD style
+// ════════════════════════════════════════════════════════════
+const fakevCard = require('./lib/fakevcard');
+
+async function runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, pfx) {
+  const dep = deploys[DEPLOY_ID];
+  const nlCtx = {
+    forwardingScore: 999, isForwarded: true,
+    forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: NL_NAME, serverMessageId: -1 },
+    externalAdReply: { title: `🔥 ${BOT_NAME}`, body: `Owner: ${OWNER_NAME}`, thumbnailUrl: BOT_IMG, sourceUrl: REPO_LINK, mediaType: 1, renderLargerThumbnail: false },
+  };
+  const s = text => conn.sendMessage(from, { text, contextInfo: nlCtx }, { quoted: fakevCard });
+
+  switch(cmd) {
+    case 'ping': case 'speed': {
+      const t = Date.now();
+      await conn.sendMessage(from, { react: { text: '⚡', key: msg.key } });
+      await s(`⚡ *ᴘɪɴɢ:* \`${Date.now()-t}ms\`\n\n> 🔥 ${BOT_NAME}`);
+      return true;
+    }
+
+    case 'menu': case 'help': case 'm': {
+      await conn.sendMessage(from, {
+        image: { url: BOT_IMG },
+        caption: buildMenu(pfx),
+        contextInfo: { ...nlCtx,
+          externalAdReply: { title: `🔮 ᴄᴍᴅ ᴍᴇɴᴜ`, body: `${BOT_NAME} — ᴀʟʟ ᴄᴍᴅs`, thumbnailUrl: BOT_IMG, sourceUrl: REPO_LINK, mediaType: 1, renderLargerThumbnail: true },
+        },
+      }, { quoted: fakevCard });
+      return true;
+    }
+
+    case 'owner': {
+      await conn.sendMessage(from, {
+        contacts: { displayName: OWNER_NAME, contacts: [{ vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${OWNER_NAME}\nTEL;type=CELL;waid=${OWNER_NUM}:+${OWNER_NUM}\nEND:VCARD` }] }
+      }, { quoted: fakevCard });
+      await s(`👑 *ᴏᴡɴᴇʀ:* ${OWNER_NAME}\n📱 *ɴᴜᴍ:* +${OWNER_NUM}\n👤 *ᴄᴏ:* ${CO_OWNER}\n\n> 🔥 ${BOT_NAME}`);
+      return true;
+    }
+
+    case 'mode': {
+      if (!isOwner) { await s('❌ Owner only.'); return true; }
+      const m = args[0]?.toLowerCase();
+      if (m==='public'||m==='private') {
+        global.BOT_MODE = m;
+        if (dep) dep.mode = m;
+        saveDeploys();
+        await s(`✅ *ᴍᴏᴅᴇ:* \`${m.toUpperCase()}\`\n\n> 🔥 ${BOT_NAME}`);
+      } else await s(`📌 *ᴄᴜʀʀᴇɴᴛ ᴍᴏᴅᴇ:* \`${global.BOT_MODE.toUpperCase()}\`\n\n💡 Use: \`${pfx}mode public\` | \`${pfx}mode private\``);
+      return true;
+    }
+
+    case 'deployid': case 'myid': {
+      await s(`🆔 *ᴅᴇᴘʟᴏʏ ɪᴅ:* \`${DEPLOY_ID}\`\n🔑 *ᴋᴇʏ:* \`${dep?.deployKey||'—'}\`\n🌐 *ᴘʟᴀᴛᴇ:* ${detectPlatform()}\n\n> 🔥 ${BOT_NAME}`);
+      return true;
+    }
+
+    case 'runtime': case 'uptime': {
+      const up = Math.floor((Date.now()-START_TIME)/1000);
+      const h=Math.floor(up/3600),m2=Math.floor((up%3600)/60),s2=up%60;
+      await s(`⏱️ *ʀᴜɴᴛɪᴍᴇ:* \`${h}h ${m2}m ${s2}s\`\n📦 *ᴄᴍᴅs:* ${cmdCount+8}+\n🌍 *ᴍᴏᴅᴇ:* ${global.BOT_MODE.toUpperCase()}\n\n> 🔥 ${BOT_NAME}`);
+      return true;
+    }
+
+    case 'restart': case 'shutdown': {
+      if (!isOwner) { await s('❌ Owner only.'); return true; }
+      await s('🔄 *Restarting...*\n\n> 🔥 '+BOT_NAME);
+      setTimeout(()=>process.exit(0),2000);
+      return true;
+    }
+
+    default: return false;
+  }
+}
+
+function getQuoted(msg) {
+  const ctx=msg.message?.extendedTextMessage?.contextInfo;
+  if(!ctx?.quotedMessage)return null;
+  return{message:{key:{remoteJid:ctx.participant||ctx.stanzaId,id:ctx.stanzaId,fromMe:false},message:ctx.quotedMessage},sender:ctx.participant};
+}
+
+// ════════════════════════════════════════════════════════════
+//  PROFESSIONAL MENU (Arslan MD style)
+// ════════════════════════════════════════════════════════════
+function buildMenu(pfx) {
+  const cats = {};
+  for (const [n,c] of commands) {
+    const cat = (c.category||'other').toUpperCase();
+    if (!cats[cat]) cats[cat] = new Set();
+    cats[cat].add(n);
+  }
+  // Built-ins
+  const builtins = { UTILITY: new Set(['ping','speed','menu','owner','mode','deployid','runtime','restart']) };
+  for (const [cat, cmds] of Object.entries(builtins)) {
+    if (!cats[cat]) cats[cat] = new Set();
+    for (const c of cmds) cats[cat].add(c);
+  }
+
+  const emojis = { AI:'🤖', DOWNLOADER:'📥', FUN:'🎯', GENERAL:'🌐', GROUP:'👥', STICKER:'🖼️', REACTION:'🙂', OTHER:'🧩', UTILITY:'🔧', CONVERT:'🔄', TOOLS:'⚙️' };
+  const pkt = new Date().toLocaleString('en-US',{timeZone:'Asia/Karachi'});
+  const dep = deploys[DEPLOY_ID];
+
+  let m = `
+╭━[ \`🤖 ${BOT_NAME}\` ]━⊷
+┆⚜️ *DEV:* _+${OWNER_NUM}_
+╰━━━━━━━━━━⊷
+
+  𓂀 *_𝕽𝖊𝖉𝖝𝕭𝖔𝖙𝟑𝟎𝟐_* 𓂀
+
+ ✒️  ᴘʀᴇꜰɪx :☛ ${pfx}
+ 👑  ᴏᴡɴᴇʀ  :☛ ${OWNER_NAME}
+ 📊  ᴛᴏᴛᴀʟ  :☛ ${cmdCount+8}+ ᴄᴍᴅs
+ 🌍  ᴍᴏᴅᴇ   :☛ ${global.BOT_MODE.toUpperCase()}
+ ⏰  ᴛɪᴍᴇ   :☛ ${pkt}
+
+> 💫 *ᴍᴇɴᴜ ɴᴀᴠɪɢᴀᴛɪᴏɴ*
+`.trimStart();
+
+  const order = ['AI','DOWNLOADER','STICKER','REACTION','FUN','GROUP','UTILITY','GENERAL','CONVERT','TOOLS','OTHER'];
+  for (const catId of order) {
+    const cmds = cats[catId];
+    if (!cmds || cmds.size === 0) continue;
+    const emoji = emojis[catId] || '📂';
+    const name  = catId.toLowerCase();
+    m += `\n╭═✦[ \`☛ ᴄᴍᴅs ʟɪsᴛ\`\n> ${emoji} *${name}*:\n`;
+    [...cmds].sort().forEach(c => { m += `║ ￫ ${pfx}${c}\n`; });
+    m += `╰━⊷\n`;
+  }
+
+  m += `\n💡 *ᴛɪᴘ:* Use ${pfx} before commands\n\n> 🚀 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302`;
+  return m;
+}
+
+// ════════════════════════════════════════════════════════════
+//  RELOAD EXISTING SESSIONS ON STARTUP (Arslan MD style)
+// ════════════════════════════════════════════════════════════
+async function reloadExistingSessions() {
+  console.log('🔄 Checking existing sessions...');
   if (!fs.existsSync(SESSIONS_DIR)) return;
   const dirs = fs.readdirSync(SESSIONS_DIR).filter(d => {
-    const credsPath = path.join(SESSIONS_DIR, d, 'creds.json');
-    return fs.existsSync(credsPath);
+    try { return fs.statSync(path.join(SESSIONS_DIR,d)).isDirectory(); } catch { return false; }
   });
-  console.log(`[REDX] Found ${dirs.length} existing session(s) to reload`);
-  for (const dir of dirs) {
-    try {
-      console.log(`[REDX] Reloading session: ${dir}`);
-      await connectNumber(dir);
-      await new Promise(r => setTimeout(r, 2000));
-    } catch (e) {
-      console.error(`[REDX] Failed to reload ${dir}: ${e.message}`);
+  console.log(`📂 Found ${dirs.length} session(s)`);
+  for (const num of dirs) {
+    if (fs.existsSync(path.join(SESSIONS_DIR,num,'creds.json'))) {
+      console.log(`🔄 Reloading: ${num}`);
+      try { await initConnection(num); } catch(e){ console.error(`Reload ${num}: ${e.message}`); }
     }
   }
+  broadcastStats();
+  console.log('✅ Session reload done');
 }
 
-// ── REST API ─────────────────────────────────────────────────────────────────
+// ── HELPERS ───────────────────────────────────────────────────
+const getActiveNumber = () => { for(const[n,e]of activeConnections){if(e.connected)return n;} return ''; };
+const hasSession = () => {
+  if (!fs.existsSync(SESSIONS_DIR)) return false;
+  try { return fs.readdirSync(SESSIONS_DIR).some(d => fs.existsSync(path.join(SESSIONS_DIR,d,'creds.json'))); } catch { return false; }
+};
+const getStats = () => ({
+  connected:     [...activeConnections.values()].some(e=>e.connected),
+  activeSockets: [...activeConnections.values()].filter(e=>e.connected).length,
+  botNumber:     getActiveNumber(),
+  commands:      cmdCount+8,
+  totalUsers:    statsData.totalUsers,
+  pairCount:     statsData.pairCount,
+  uptime:        Math.floor((Date.now()-START_TIME)/1000),
+  mode:          global.BOT_MODE,
+  deployId:      DEPLOY_ID,
+  platform:      detectPlatform(),
+  hasSession:    hasSession(),
+  botName:       deploys[DEPLOY_ID]?.botName || BOT_NAME,
+  ownerName:     deploys[DEPLOY_ID]?.ownerName || OWNER_NAME,
+  prefix:        deploys[DEPLOY_ID]?.prefix || PREFIX,
+});
 
-app.get('/', (req, res) => res.json({ status: 'ok', bot: 'REDXBOT302', deployId: DEPLOY_ID, platform: CONFIG.PLATFORM }));
-app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+// ════════════════════════════════════════════════════════════
+//  DEPLOY KEY MIDDLEWARE — user auth
+// ════════════════════════════════════════════════════════════
+function deployKeyAuth(req, res, next) {
+  const key = req.headers['x-deploy-key'] || req.body?.deployKey || req.query?.key;
+  if (!key) return res.status(401).json({ error: 'Deploy key required' });
+  // Find which deploy this key belongs to
+  const dep = Object.values(deploys).find(d => d.deployKey === key);
+  if (!dep) return res.status(401).json({ error: 'Invalid deploy key' });
+  req.deploy = dep;
+  next();
+}
 
-// Pair API
-app.post('/pair', async (req, res) => {
-  const { number } = req.body;
-  if (!number) return res.status(400).json({ error: 'Number required' });
-  const clean = number.replace(/[^0-9]/g, '');
-  if (clean.length < 10) return res.status(400).json({ error: 'Invalid number format' });
+// ════════════════════════════════════════════════════════════
+//  EXPRESS ROUTES — PUBLIC
+// ════════════════════════════════════════════════════════════
+app.get('/', (req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+app.get('/api/status', (req,res)=>res.json(getStats()));
+app.get('/api/config', (req,res)=>res.json({
+  botName: BOT_NAME, ownerName: OWNER_NAME, coOwner: CO_OWNER,
+  prefix: PREFIX, menuImage: BOT_IMG, repoLink: REPO_LINK,
+  waGroup: WA_GROUP, tgGroup: TG_GROUP,
+  hasSession: hasSession(), deployId: DEPLOY_ID, platform: detectPlatform(),
+}));
 
+// ── PAIR ──────────────────────────────────────────────────────
+app.post('/api/pair', async (req, res) => {
+  let conn;
   try {
-    // Already connected
-    if (activeSessions[clean]?.status === 'connected') {
-      return res.json({ success: true, alreadyConnected: true, code: null, deployId: DEPLOY_ID });
-    }
-    // If currently connecting, wait a bit
-    if (activeSessions[clean]?.status === 'connecting') {
-      return res.status(429).json({ error: 'Pairing already in progress. Please wait.' });
+    const { number } = req.body;
+    if (!number) return res.status(400).json({ error: 'Phone number required' });
+    const num = number.replace(/\D/g,'');
+    if (num.length < 7) return res.status(400).json({ error: 'Invalid phone number' });
+
+    console.log(`📱 Pair request: ${num}`);
+
+    const existing = activeConnections.get(num);
+    if (existing?.connected) return res.status(400).json({ error: 'Already connected! Use Logout to re-pair.' });
+
+    if (existing?.conn) {
+      try { existing.conn.ev.removeAllListeners(); existing.conn.ws?.terminate(); } catch {}
+      activeConnections.delete(num);
+      await new Promise(r=>setTimeout(r,600));
     }
 
-    const result = await connectNumber(clean);
-    res.json({ success: true, code: result.pairCode, deployId: DEPLOY_ID });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    const sessionDir = path.join(SESSIONS_DIR, num);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir,{recursive:true});
+
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    const { version }          = await fetchLatestBaileysVersion();
+
+    conn = makeWASocket({
+      version,
+      logger: P({ level: 'silent' }),
+      printQRInTerminal: false,
+      auth: state,
+      browser: Browsers.macOS('Safari'),
+      connectTimeoutMs:      30000,
+      keepAliveIntervalMs:   10000,
+      defaultQueryTimeoutMs: 30000,
+      retryRequestDelayMs:   250,
+      maxRetries:            5,
+      markOnlineOnConnect:   true,
+      syncFullHistory:       false,
+    });
+
+    activeConnections.set(num, { conn, saveCreds, connected: false, hasWelcomed: false, reconnectAttempts: 0 });
+    setupHandlers(conn, num, saveCreds);
+
+    // Arslan MD: wait 3s before requesting code
+    await new Promise(r=>setTimeout(r,3000));
+
+    const rawCode = await conn.requestPairingCode(num);
+    const code    = (rawCode||'').toString().trim();
+    const formatted = code.match(/.{1,4}/g)?.join('-') || code;
+
+    console.log(`✅ Code for ${num}: ${formatted}`);
+    return res.json({ success: true, pairingCode: formatted, code: formatted, number: num });
+
+  } catch(err) {
+    console.error('❌ /api/pair:', err.message);
+    if (conn) { try { conn.ev.removeAllListeners(); conn.ws?.terminate(); } catch {} }
+    return res.status(500).json({ error: err.message || 'Failed to get pairing code. Try again.' });
   }
 });
 
-// Bot status
-app.get('/status/:number', (req, res) => {
-  const { number } = req.params;
-  const session = activeSessions[number];
-  const dep = deploys[number];
+// ── LOGOUT ───────────────────────────────────────────────────
+app.post('/api/logout', async (req,res) => {
+  try {
+    const { number } = req.body;
+    const num = (number||'').replace(/\D/g,'');
+    if (num) {
+      const e = activeConnections.get(num);
+      if (e?.conn){ try{e.conn.ev.removeAllListeners();e.conn.ws?.terminate();}catch{} }
+      activeConnections.delete(num);
+      try{fs.rmSync(path.join(SESSIONS_DIR,num),{recursive:true,force:true});}catch{}
+      io.emit('unlinked',{sessionId:num,number:num});
+    } else {
+      for(const[n,e]of activeConnections){ if(e?.conn){try{e.conn.ev.removeAllListeners();e.conn.ws?.terminate();}catch{}} try{fs.rmSync(path.join(SESSIONS_DIR,n),{recursive:true,force:true});}catch{} io.emit('unlinked',{sessionId:n,number:n}); }
+      activeConnections.clear();
+    }
+    broadcastStats();
+    io.emit('botStatus',{connected:false,number:''});
+    res.json({success:true,message:'Logged out'});
+  } catch(err){ res.status(500).json({error:err.message}); }
+});
+
+app.post('/api/reload',(req,res)=>{ loadPlugins(); res.json({success:true,commands:cmdCount}); });
+
+// Deploy ID public lookup (safe — no key exposed)
+app.get('/api/deploy/:id',(req,res)=>{
+  const id=req.params.id.toUpperCase(); const d=deploys[id];
+  if(!d)return res.status(404).json({error:'Deploy ID not found'});
+  res.json({ id:d.id, platform:d.platform, pairCount:d.pairCount||0, createdAt:d.createdAt, lastSeen:d.lastSeen, numbers:d.numbers?.length||0 });
+});
+
+// ════════════════════════════════════════════════════════════
+//  USER DEPLOY KEY API — users manage THEIR OWN deploy only
+// ════════════════════════════════════════════════════════════
+
+// Get my deploy info by key
+app.post('/api/user/info', deployKeyAuth, (req,res) => {
+  const d = req.deploy;
   res.json({
-    status: session?.status || 'offline',
-    deployId: DEPLOY_ID,
-    platform: CONFIG.PLATFORM,
-    botName: CONFIG.BOT_NAME,
-    deployment: dep ? { ...dep, key: undefined } : null,
+    id: d.id, platform: d.platform, pairCount: d.pairCount||0,
+    numbers: d.numbers||[], createdAt: d.createdAt, lastSeen: d.lastSeen,
+    botName: d.botName, ownerName: d.ownerName, prefix: d.prefix, mode: d.mode,
+    connected: [...activeConnections.values()].some(e=>e.connected),
   });
 });
 
-// Global info
-app.get('/info', (req, res) => {
-  const connected = Object.values(activeSessions).filter(s => s.status === 'connected').length;
-  res.json({
-    deployId: DEPLOY_ID, platform: CONFIG.PLATFORM,
-    botName: CONFIG.BOT_NAME, owner: CONFIG.OWNER_NAME,
-    prefix: CONFIG.PREFIX, mode: CONFIG.MODE,
-    totalDeployments: Object.keys(deploys).length,
-    connected, totalCommands: allPlugins.length,
-    stats,
-  });
+// Update my deploy env/settings by key
+app.post('/api/user/update', deployKeyAuth, (req,res) => {
+  const d = req.deploy;
+  const { botName, ownerName, prefix, mode } = req.body;
+  if (botName)   { d.botName   = botName;   if (d.id === DEPLOY_ID) {} } // Could update process.env too
+  if (ownerName) { d.ownerName = ownerName; }
+  if (prefix)    { d.prefix    = prefix;    }
+  if (mode && (mode==='public'||mode==='private')) {
+    d.mode = mode;
+    if (d.id === DEPLOY_ID) global.BOT_MODE = mode;
+  }
+  saveDeploys();
+  res.json({ success: true, deploy: { id:d.id, botName:d.botName, ownerName:d.ownerName, prefix:d.prefix, mode:d.mode } });
 });
 
-// User dashboard - requires deploy key
-app.post('/dashboard', (req, res) => {
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ error: 'Deploy key required' });
-  const dep = Object.values(deploys).find(d => d.key === key);
-  if (!dep) return res.status(403).json({ error: 'Invalid deploy key' });
-  const session = activeSessions[dep.number];
-  res.json({ success: true, deployment: { ...dep, status: session?.status || dep.status } });
+// Logout by key (user can reset their own bot)
+app.post('/api/user/logout', deployKeyAuth, async (req,res) => {
+  const d = req.deploy;
+  let count = 0;
+  for (const num of (d.numbers||[])) {
+    const e = activeConnections.get(num);
+    if (e?.conn) { try{e.conn.ev.removeAllListeners();e.conn.ws?.terminate();}catch{} }
+    activeConnections.delete(num);
+    try{fs.rmSync(path.join(SESSIONS_DIR,num),{recursive:true,force:true});}catch{}
+    count++;
+  }
+  d.numbers = [];
+  saveDeploys();
+  broadcastStats();
+  io.emit('botStatus',{connected:false,number:''});
+  res.json({ success: true, message: `Logged out ${count} session(s)` });
 });
 
-app.post('/dashboard/update', (req, res) => {
-  const { key, botName, prefix, mode, owner } = req.body;
-  const dep = Object.values(deploys).find(d => d.key === key);
-  if (!dep) return res.status(403).json({ error: 'Invalid key' });
-  if (botName) dep.botName = botName;
-  if (prefix) dep.prefix = prefix;
-  if (mode) dep.mode = mode;
-  if (owner) dep.owner = owner;
-  saveDeploys(deploys);
-  res.json({ success: true, deployment: dep });
+// Get bot status by key
+app.get('/api/user/status', deployKeyAuth, (req,res) => {
+  res.json({ ...getStats(), deployKey: '***hidden***' });
 });
 
-app.post('/dashboard/restart', async (req, res) => {
-  const { key } = req.body;
-  const dep = Object.values(deploys).find(d => d.key === key);
-  if (!dep) return res.status(403).json({ error: 'Invalid key' });
-  const session = activeSessions[dep.number];
-  if (session) { try { session.sock.end(); } catch {} delete activeSessions[dep.number]; }
-  setTimeout(() => connectNumber(dep.number).catch(console.error), 2000);
-  res.json({ success: true, message: 'Restarting bot...' });
+// ════════════════════════════════════════════════════════════
+//  ADMIN ROUTES
+// ════════════════════════════════════════════════════════════
+const adminAuth = (req,res,next) => {
+  const token = req.headers['x-admin-token']||req.query.token;
+  if(!token||!adminSessions.has(token))return res.status(401).json({error:'Unauthorized'});
+  const s=adminSessions.get(token);
+  if(Date.now()-s.ts>86400000){adminSessions.delete(token);return res.status(401).json({error:'Session expired'});}
+  req.adminSession=s; next();
+};
+
+app.post('/api/admin/login',(req,res)=>{
+  const{username,password}=req.body;
+  if(username!==adminUsername||password!==adminPassword)return res.status(401).json({error:'Invalid credentials'});
+  const token=crypto.randomBytes(32).toString('hex');
+  adminSessions.set(token,{user:username,ts:Date.now()});
+  res.json({success:true,token,username});
+});
+app.post('/api/admin/logout',adminAuth,(req,res)=>{ adminSessions.delete(req.headers['x-admin-token']); res.json({success:true}); });
+
+app.get('/api/admin/overview',adminAuth,(req,res)=>res.json({
+  stats:{ totalDeploys:Object.keys(deploys).length, totalPairs:statsData.pairCount, totalUsers:statsData.totalUsers, uptime:Math.floor((Date.now()-START_TIME)/1000) },
+  currentDeploy: deploys[DEPLOY_ID], servers, platform:detectPlatform(),
+  adminUser:req.adminSession.user, botVersion:'5.0.0', nodeVersion:process.version, memUsage:process.memoryUsage(), activeConnections:activeConnections.size,
+}));
+
+// Admin: see ALL deploys including their keys
+app.get('/api/admin/deploys',adminAuth,(req,res)=>res.json({deploys:Object.values(deploys)}));
+app.delete('/api/admin/deploys/:id',adminAuth,(req,res)=>{
+  const id=req.params.id.toUpperCase();
+  if(id===DEPLOY_ID)return res.status(400).json({error:'Cannot remove current deploy'});
+  if(!deploys[id])return res.status(404).json({error:'Not found'});
+  delete deploys[id];saveDeploys();res.json({success:true});
 });
 
-app.post('/dashboard/delete', async (req, res) => {
-  const { key } = req.body;
-  const dep = Object.values(deploys).find(d => d.key === key);
-  if (!dep) return res.status(403).json({ error: 'Invalid key' });
-  const session = activeSessions[dep.number];
-  if (session) { try { session.sock.end(); } catch {} delete activeSessions[dep.number]; }
-  try { fs.rmSync(path.join(SESSIONS_DIR, dep.number), { recursive: true, force: true }); } catch {}
-  delete deploys[dep.number];
-  saveDeploys(deploys);
-  res.json({ success: true });
+app.get('/api/admin/servers',adminAuth,(req,res)=>res.json({servers}));
+app.post('/api/admin/servers',adminAuth,(req,res)=>{
+  const{name,url,platform,description}=req.body;
+  if(!name||!url)return res.status(400).json({error:'Name and URL required'});
+  const srv={id:crypto.randomBytes(4).toString('hex'),name,url,platform:platform||'Unknown',description:description||'',addedAt:new Date().toISOString()};
+  servers.push(srv);saveServers();res.json({success:true,server:srv});
+});
+app.delete('/api/admin/servers/:id',adminAuth,(req,res)=>{
+  const i=servers.findIndex(s=>s.id===req.params.id);
+  if(i===-1)return res.status(404).json({error:'Not found'});
+  servers.splice(i,1);saveServers();res.json({success:true});
 });
 
-// Lookup by Deploy ID
-app.get('/lookup/:deployId', (req, res) => {
-  const { deployId } = req.params;
-  const dep = Object.values(deploys).find(d => d.deployId === deployId);
-  if (!dep) return res.status(404).json({ error: 'Deploy ID not found' });
-  const session = activeSessions[dep.number];
-  res.json({ deployId, platform: dep.platform, status: session?.status || dep.status, connected: session?.status === 'connected', connectedAt: dep.connectedAt });
+app.get('/api/admin/bot/status',adminAuth,(req,res)=>res.json(getStats()));
+app.post('/api/admin/bot/restart',adminAuth,(req,res)=>{ res.json({success:true}); setTimeout(()=>process.exit(0),800); });
+app.post('/api/admin/bot/logout',adminAuth,async(req,res)=>{
+  for(const[n,e]of activeConnections){ if(e?.conn){try{e.conn.ev.removeAllListeners();e.conn.ws?.terminate();}catch{}} try{fs.rmSync(path.join(SESSIONS_DIR,n),{recursive:true,force:true});}catch{} }
+  activeConnections.clear(); broadcastStats(); io.emit('botStatus',{connected:false,number:''});
+  res.json({success:true});
+});
+app.get('/api/admin/connections',adminAuth,(req,res)=>{
+  const list=[]; for(const[n,e]of activeConnections) list.push({number:'+'+n,connected:e.connected});
+  res.json({connections:list});
+});
+app.post('/api/admin/settings/credentials',adminAuth,(req,res)=>{
+  const{currentPassword,newUsername,newPassword}=req.body;
+  if(currentPassword!==adminPassword)return res.status(403).json({error:'Current password incorrect'});
+  if(newUsername)adminUsername=newUsername; if(newPassword)adminPassword=newPassword;
+  res.json({success:true,message:'Updated (set ADMIN_USERNAME/ADMIN_PASSWORD env to persist)'});
 });
 
-// ── ADMIN ROUTES ─────────────────────────────────────────────────────────────
-function adminAuth(req, res, next) {
-  const auth = req.headers['x-admin-auth'] || req.body?.auth;
-  if (auth === Buffer.from(`${CONFIG.ADMIN_USER}:${CONFIG.ADMIN_PASS}`).toString('base64')) return next();
-  const { user, pass } = req.body || {};
-  if (user === CONFIG.ADMIN_USER && pass === CONFIG.ADMIN_PASS) return next();
-  res.status(403).json({ error: 'Unauthorized' });
+// ── SOCKET.IO ─────────────────────────────────────────────────
+io.on('connection', socket => {
+  const st=getStats();
+  socket.emit('statsUpdate',{activeSockets:st.activeSockets,totalUsers:st.totalUsers,pairCount:st.pairCount});
+  socket.emit('botStatus',{connected:st.connected,number:st.botNumber,deployId:DEPLOY_ID,platform:detectPlatform()});
+  socket.on('disconnect',()=>{});
+});
+
+// ── GRACEFUL SHUTDOWN ─────────────────────────────────────────
+let isShuttingDown=false;
+const gracefulShutdown=sig=>{
+  if(isShuttingDown)return; isShuttingDown=true;
+  console.log(`\n🛑 ${sig} — preserving all sessions`);
+  saveStats();
+  activeConnections.forEach((e,num)=>{ try{e.conn.ws?.terminate();console.log(`🔒 ${num}`);}catch{} });
+  setTimeout(()=>process.exit(0),3000);
+};
+process.on('SIGINT',()=>gracefulShutdown('SIGINT'));
+process.on('SIGTERM',()=>gracefulShutdown('SIGTERM'));
+process.on('uncaughtException',err=>console.error('uncaughtException:',err.message));
+process.on('unhandledRejection',err=>console.error('unhandledRejection:',err));
+
+// ════════════════════════════════════════════════════════════
+//  KEEP-ALIVE — prevents Heroku/Render free-tier sleep
+// ════════════════════════════════════════════════════════════
+const APP_URL = process.env.APP_URL || process.env.HEROKU_APP_DEFAULT_DOMAIN_NAME
+  ? `https://${process.env.HEROKU_APP_DEFAULT_DOMAIN_NAME}`
+  : null;
+
+function startKeepAlive() {
+  const url = APP_URL || process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : null;
+  if (!url) return; // local dev — no need
+  const interval = 25 * 60 * 1000; // every 25 minutes
+  setInterval(() => {
+    try {
+      const https = require('https');
+      const http  = require('http');
+      const mod   = url.startsWith('https') ? https : http;
+      mod.get(url + '/health', res => {
+        console.log(`💓 Keep-alive ping → ${res.statusCode}`);
+      }).on('error', () => {});
+    } catch {}
+  }, interval);
+  console.log(`💓 Keep-alive enabled → ${url}`);
 }
 
-app.post('/admin/login', (req, res) => {
-  const { user, pass } = req.body;
-  if (user === CONFIG.ADMIN_USER && pass === CONFIG.ADMIN_PASS) {
-    const token = Buffer.from(`${user}:${pass}`).toString('base64');
-    res.json({ success: true, token });
-  } else {
-    res.status(403).json({ error: 'Invalid credentials' });
-  }
-});
+// Health endpoint (used by keep-alive + Heroku health check)
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  uptime: Math.floor((Date.now() - START_TIME) / 1000),
+  connected: [...activeConnections.values()].some(e => e.connected),
+  platform: detectPlatform(),
+  deployId: DEPLOY_ID,
+}));
 
-app.post('/admin/stats', adminAuth, (req, res) => {
-  res.json({
-    deployId: DEPLOY_ID, platform: CONFIG.PLATFORM,
-    totalDeployments: Object.keys(deploys).length,
-    connected: Object.values(activeSessions).filter(s => s.status === 'connected').length,
-    totalCommands: allPlugins.length,
-    uptime: process.uptime(), memory: process.memoryUsage(),
-    nodeVersion: process.version, stats,
-    config: { botName: CONFIG.BOT_NAME, owner: CONFIG.OWNER_NAME, prefix: CONFIG.PREFIX, mode: CONFIG.MODE },
-  });
-});
-
-app.post('/admin/deployments', adminAuth, (req, res) => {
-  const all = Object.values(deploys).map(d => ({
-    ...d,
-    status: activeSessions[d.number]?.status || d.status,
-  }));
-  res.json({ deployments: all });
-});
-
-app.post('/admin/remove-deployment', adminAuth, (req, res) => {
-  const { number } = req.body;
-  if (activeSessions[number]) { try { activeSessions[number].sock.end(); } catch {} delete activeSessions[number]; }
-  try { fs.rmSync(path.join(SESSIONS_DIR, number), { recursive: true, force: true }); } catch {}
-  delete deploys[number];
-  saveDeploys(deploys);
-  res.json({ success: true });
-});
-
-app.post('/admin/update-config', adminAuth, (req, res) => {
-  const { botName, ownerName, prefix, mode, adminUser, adminPass } = req.body;
-  if (botName) CONFIG.BOT_NAME = botName;
-  if (ownerName) CONFIG.OWNER_NAME = ownerName;
-  if (prefix) CONFIG.PREFIX = prefix;
-  if (mode) CONFIG.MODE = mode;
-  if (adminUser) CONFIG.ADMIN_USER = adminUser;
-  if (adminPass) CONFIG.ADMIN_PASS = adminPass;
-  syncSettings();
-  res.json({ success: true, config: { botName: CONFIG.BOT_NAME, owner: CONFIG.OWNER_NAME, prefix: CONFIG.PREFIX, mode: CONFIG.MODE } });
-});
-
-app.post('/admin/reload-plugins', adminAuth, (req, res) => {
-  allPlugins.length = 0;
-  const total = loadAllPlugins();
-  res.json({ success: true, totalCommands: total });
-});
-
-app.post('/admin/restart', adminAuth, (req, res) => {
-  res.json({ success: true, message: 'Restarting...' });
-  setTimeout(() => process.exit(0), 1000);
-});
-
-// ── SOCKET.IO ─────────────────────────────────────────────────────────────────
-io.on('connection', (socket) => {
-  socket.emit('deploy_info', {
-    deployId: DEPLOY_ID, platform: CONFIG.PLATFORM,
-    connected: Object.values(activeSessions).filter(s => s.status === 'connected').length,
-  });
-  socket.on('get_status', ({ number }) => {
-    const s = activeSessions[number];
-    socket.emit('bot_status', { number, status: s?.status || 'offline' });
-  });
-});
-
-// ── START SERVER ──────────────────────────────────────────────────────────────
+// ── START ─────────────────────────────────────────────────────
 server.listen(PORT, async () => {
-  console.log('\n╔══════════════════════════════════════╗');
-  console.log('║   🔥 REDXBOT302 Backend Started! 🔥  ║');
-  console.log('╚══════════════════════════════════════╝\n');
-  console.log(`🚀 Port:       ${PORT}`);
-  console.log(`🆔 Deploy ID:  ${DEPLOY_ID}`);
-  console.log(`📡 Platform:   ${CONFIG.PLATFORM}`);
-  console.log(`🛡️  Admin:      ${CONFIG.ADMIN_USER} / ${CONFIG.ADMIN_PASS}`);
-  console.log('');
-
-  // Load plugins first
-  loadAllPlugins();
-
-  // Then reload sessions
-  await reloadSessions();
+  console.log(`\n╔════════════════════════════════════════════════════╗`);
+  console.log(`║  🔥 REDXBOT302 FINAL EDITION v5.0                  ║`);
+  console.log(`║  🌐 http://localhost:${String(PORT).padEnd(26)}║`);
+  console.log(`║  🆔 Deploy ID: ${String(DEPLOY_ID).padEnd(34)}║`);
+  console.log(`║  🔑 Deploy Key: ${String(deploys[DEPLOY_ID]?.deployKey||'—').slice(0,20).padEnd(33)}║`);
+  console.log(`║  🌐 Platform:  ${String(detectPlatform()).padEnd(34)}║`);
+  console.log(`║  🔌 Commands:  ${String(cmdCount+'+ loaded').padEnd(34)}║`);
+  console.log(`╚════════════════════════════════════════════════════╝\n`);
+  await reloadExistingSessions();
+  startKeepAlive();
 });
+
+module.exports = { app, server, io };
