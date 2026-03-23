@@ -5,7 +5,7 @@
  */
 
 'use strict';
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+
 const fakevCard      = require('../lib/fakevcard');
 const fs             = require('fs');
 const path           = require('path');
@@ -72,6 +72,8 @@ module.exports = [
 
         const type = Object.keys(vo)[0];
         const media = vo[type];
+
+        const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
         const stream = await downloadContentFromMessage(media, type.replace('Message', ''));
         let buf = Buffer.alloc(0);
         for await (const c of stream) buf = Buffer.concat([buf, c]);

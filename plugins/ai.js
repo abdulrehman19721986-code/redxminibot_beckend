@@ -1,180 +1,246 @@
-/**
- * REDXBOT302 — AI Plugin
- * Owner: Abdul Rehman Rajpoot
- */
-
-'use strict';
-
+// === ai-commands.js ===
 const { fetchJson } = require('../lib/functions2');
-const fakevCard     = require('../lib/fakevcard');
-const axios         = require('axios');
-const FormData      = require('form-data');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-
-const BOT_NAME       = process.env.BOT_NAME       || '🔥 REDXBOT302 🔥';
-const NEWSLETTER_JID = process.env.NEWSLETTER_JID || '120363405513439052@newsletter';
-
-const ctxInfo = () => ({
-  forwardingScore: 999,
-  isForwarded: true,
-  forwardedNewsletterMessageInfo: {
-    newsletterJid: NEWSLETTER_JID,
-    newsletterName: `🔥 ${BOT_NAME}`,
-    serverMessageId: 200,
-  },
-});
+const { fakevCard } = require('../lib/fakevcard');
+const axios = require('axios');
+const FormData = require('form-data');
 
 module.exports = [
-  // ── GPT / AI Chat
   {
-    pattern: 'ai',
-    alias: ['gpt', 'chatgpt', 'ask'],
-    desc: 'Chat with AI (GPT)',
-    category: 'AI',
-    react: '🤖',
-    use: '.ai your question',
-    execute: async (conn, msg, m, { from, q, reply }) => {
+    pattern: "fluxai",
+    desc: "Generate an image using AI",
+    category: "ai",
+    react: "🖼️",
+    filename: __filename,
+    use: ".fluxai prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
       try {
-        if (!q) return reply('❌ Ask something! Example: *.ai what is the capital of France?*');
-        await conn.sendMessage(from, { react: { text: '🤖', key: msg.key } });
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for the image. Example: .fluxai a serene beach at sunset");
+        }
 
-        const res = await fetchJson(`https://api.siputzx.my.id/api/ai/chatgpt?prompt=${encodeURIComponent(q)}`);
-        const answer = res?.data || res?.result || res?.message || res?.response || 'No response';
+        const prompt = args.join(" ");
+        const apiUrl = `https://api.siputzx.my.id/api/ai/flux?prompt=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
+
+        if (!result?.download_url) {
+          return reply("❌ Failed to generate image.");
+        }
 
         await conn.sendMessage(from, {
-          text: `🤖 *AI Response*\n\n*Q:* ${q}\n\n*A:* ${answer}\n\n> 🔥 ${BOT_NAME}`,
-          contextInfo: ctxInfo(),
+          image: { url: result.download_url },
+          caption: "🖼️ Your AI-Generated Image"
         }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+
       } catch (e) {
-        await conn.sendMessage(from, { react: { text: '❌', key: msg.key } });
-        reply(`❌ AI Error: ${e.message}`);
+        return reply(`❌ Error: ${e.message}`);
       }
-    },
+    }
   },
-
-  // ── DeepSeek
   {
-    pattern: 'deepseek',
-    alias: ['ds'],
-    desc: 'Chat with DeepSeek AI',
-    category: 'AI',
-    react: '🧠',
-    use: '.deepseek your question',
-    execute: async (conn, msg, m, { from, q, reply }) => {
+    pattern: "suno",
+    desc: "Generate AI music with Suno",
+    category: "ai",
+    react: "🎵",
+    filename: __filename,
+    use: ".suno prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
       try {
-        if (!q) return reply('❌ Example: *.deepseek explain quantum computing*');
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for the music. Example: .suno a happy pop song");
+        }
 
-        const res = await fetchJson(`https://api.siputzx.my.id/api/ai/deepseek-r1?content=${encodeURIComponent(q)}`);
-        const answer = res?.data || res?.result || 'No response';
+        const prompt = args.join(" ");
+        const apiUrl = `https://api.privatezia.biz.id/api/ai/suno?query=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
+
+        if (!result?.status || !result?.result?.data?.length) {
+          return reply("❌ Failed to generate music.");
+        }
+
+        const data = result.result.data[0];
+        const audioUrl = data.audio_url;
+        const imageUrl = data.image_url;
+        const title = data.title;
 
         await conn.sendMessage(from, {
-          text: `🧠 *DeepSeek AI*\n\n*Q:* ${q}\n\n*A:* ${answer}\n\n> 🔥 ${BOT_NAME}`,
-          contextInfo: ctxInfo(),
+          image: { url: imageUrl },
+          caption: `🎵 Your AI-Generated Music\nTitle: ${title}`
         }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch (e) {
-        reply(`❌ Error: ${e.message}`);
-      }
-    },
-  },
-
-  // ── AI Image Generation (Flux)
-  {
-    pattern: 'imagine',
-    alias: ['fluxai', 'aiimage', 'genimg'],
-    desc: 'Generate AI image from text prompt',
-    category: 'AI',
-    react: '🖼️',
-    use: '.imagine a dragon flying over mountains',
-    execute: async (conn, msg, m, { from, q, reply }) => {
-      try {
-        if (!q) return reply('❌ Give a prompt! Example: *.imagine a sunset over Pakistan*');
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-
-        const res = await fetchJson(`https://api.siputzx.my.id/api/ai/flux?prompt=${encodeURIComponent(q)}`);
-        const url = res?.download_url || res?.url || res?.data;
-        if (!url) return reply('❌ Could not generate image.');
 
         await conn.sendMessage(from, {
-          image: { url },
-          caption: `🎨 *AI Generated Image*\n\n📝 Prompt: ${q}\n\n> 🔥 ${BOT_NAME}`,
-          contextInfo: ctxInfo(),
+          audio: { url: audioUrl },
+          mimetype: 'audio/mpeg',
+          fileName: `${title}.mp3`
         }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+
       } catch (e) {
-        await conn.sendMessage(from, { react: { text: '❌', key: msg.key } });
-        reply(`❌ Image gen error: ${e.message}`);
+        return reply(`❌ Error: ${e.message}`);
       }
-    },
+    }
   },
-
-  // ── OCR - Image to Text
   {
-    pattern: 'ocr',
-    alias: ['readimg', 'imgtotext'],
-    desc: 'Read text from image (OCR)',
-    category: 'AI',
-    react: '📝',
-    use: '.ocr (reply to image)',
-    execute: async (conn, msg, m, { from, reply }) => {
+    pattern: "gpt4",
+    desc: "Generate text using GPT-4 AI",
+    category: "ai",
+    react: "🤖",
+    filename: __filename,
+    use: ".gpt4 prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
       try {
-        const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        const target = quoted?.imageMessage || msg.message?.imageMessage;
-        if (!target) return reply('❌ Reply to an image with *.ocr*');
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for GPT-4. Example: .gpt4 who is the first president of Indonesia?");
+        }
 
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-        const stream = await downloadContentFromMessage(target, 'image');
-        let buf = Buffer.alloc(0);
-        for await (const c of stream) buf = Buffer.concat([buf, c]);
+        const prompt = args.join(" ");
+        const apiUrl = `https://api.privatezia.biz.id/api/ai/GPT-4?query=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
 
+        if (!result?.status || !result?.response) {
+          return reply("❌ Failed to generate response.");
+        }
+
+        await conn.sendMessage(from, {
+          text: `🤖 Your GPT-4 Response\n\n${result.response}`
+        }, { quoted: fakevCard });
+
+      } catch (e) {
+        return reply(`❌ Error: ${e.message}`);
+      }
+    }
+  },
+  {
+    pattern: "luminai",
+    desc: "Generate text using LuminAI",
+    category: "ai",
+    react: "🤖",
+    filename: __filename,
+    use: ".luminai prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
+      try {
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for LuminAI. Example: .luminai hello");
+        }
+
+        const prompt = args.join(" ");
+        const apiUrl = `https://api.ziapanelku.my.id/ai/luminai?text=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
+
+        if (!result?.status || !result?.result) {
+          return reply("❌ Failed to generate response.");
+        }
+
+        await conn.sendMessage(from, {
+          text: `🤖 Your LuminAI Response\n\n${result.result}`
+        }, { quoted: fakevCard });
+
+      } catch (e) {
+        return reply(`❌ Error: ${e.message}`);
+      }
+    }
+  },
+  {
+    pattern: "metaai",
+    desc: "Generate text using Meta AI",
+    category: "ai",
+    react: "🤖",
+    filename: __filename,
+    use: ".metaai prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
+      try {
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for Meta AI. Example: .metaai what is the capital of France?");
+        }
+
+        const prompt = args.join(" ");
+        const apiUrl = `https://apis.davidcyriltech.my.id/ai/metaai?text=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
+
+        if (!result?.success || !result?.response) {
+          return reply("❌ Failed to generate response.");
+        }
+
+        await conn.sendMessage(from, {
+          text: `🤖 Your Meta AI Response\n\n${result.response}`
+        }, { quoted: fakevCard });
+
+      } catch (e) {
+        return reply(`❌ Error: ${e.message}`);
+      }
+    }
+  },
+  {
+    pattern: "artly",
+    desc: "Generate AI images with Artly",
+    category: "ai",
+    react: "🎨",
+    filename: __filename,
+    use: ".artly prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
+      try {
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for Artly. Example: .artly a cat with a hat");
+        }
+
+        const prompt = args.join(" ");
         const form = new FormData();
-        form.append('file', buf, { filename: 'img.jpg', contentType: 'image/jpeg' });
-        const res = await axios.post('https://api.ocr.space/parse/image', form, {
-          headers: { ...form.getHeaders(), apikey: 'helloworld' },
-          timeout: 30000,
+        form.append('prompt', prompt);
+        form.append('width', '512');
+        form.append('height', '512');
+        form.append('num_inference_steps', '25');
+
+        const response = await axios.post('https://getimg-x4mrsuupda-uc.a.run.app/api-premium', form, {
+          headers: {
+            'user-agent': 'NB Android/1.0.0',
+            'accept-encoding': 'gzip',
+            'content-type': 'application/x-www-form-urlencoded',
+            ...form.getHeaders()
+          }
         });
-        const text = res.data?.ParsedResults?.[0]?.ParsedText?.trim();
-        if (!text) return reply('❌ No text found in image.');
+
+        const result = response.data;
+
+        if (!result?.url) {
+          return reply("❌ Failed to generate image.");
+        }
 
         await conn.sendMessage(from, {
-          text: `📝 *OCR Result*\n\n${text}\n\n> 🔥 ${BOT_NAME}`,
-          contextInfo: ctxInfo(),
+          image: { url: result.url },
+          caption: `🎨 Your Artly Image\nSeed: ${result.seed}\nCost: ${result.cost}`
         }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch (e) {
-        reply(`❌ OCR Error: ${e.message}`);
-      }
-    },
-  },
 
-  // ── Summarize
+      } catch (e) {
+        return reply(`❌ Error: ${e.message}`);
+      }
+    }
+  },
   {
-    pattern: 'summarize',
-    alias: ['sum', 'tldr'],
-    desc: 'Summarize text with AI',
-    category: 'AI',
-    react: '📋',
-    use: '.summarize long text here',
-    execute: async (conn, msg, m, { from, q, reply }) => {
+    pattern: "aiclaude",
+    desc: "Get AI response from Claude API",
+    category: "ai",
+    react: "🤖",
+    filename: __filename,
+    use: ".aiclaude prompt",
+    execute: async (conn, mek, m, { from, args, reply }) => {
       try {
-        if (!q) return reply('❌ Provide text to summarize.');
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
+        if (!args.length) {
+          return reply("❌ Please provide a prompt for Claude. Example: .aiclaude tell me a story");
+        }
 
-        const prompt = `Summarize the following in 3-4 sentences:\n\n${q}`;
-        const res = await fetchJson(`https://api.siputzx.my.id/api/ai/chatgpt?prompt=${encodeURIComponent(prompt)}`);
-        const answer = res?.data || res?.result || 'Could not summarize.';
+        const prompt = args.join(" ");
+        const apiUrl = `https://api.ryzendesu.vip/api/ai/claude?text=${encodeURIComponent(prompt)}`;
+        const result = await fetchJson(apiUrl);
+
+        if (!result?.response) {
+          return reply("❌ Failed to generate response.");
+        }
 
         await conn.sendMessage(from, {
-          text: `📋 *Summary*\n\n${answer}\n\n> 🔥 ${BOT_NAME}`,
-          contextInfo: ctxInfo(),
+          text: `🤖 Your Claude Response\n\n${result.response}`
         }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+
       } catch (e) {
-        reply(`❌ Error: ${e.message}`);
+        return reply(`❌ Error: ${e.message}`);
       }
-    },
-  },
+    }
+  }
 ];

@@ -1,292 +1,247 @@
 /**
- * REDXBOT302 — Group Management Plugin
- * Owner: Abdul Rehman Rajpoot
+ * REDXBOT302 - Group Management Plugins
+ * Category: groups
  */
-
-'use strict';
-
-const path = require('path');
-const fs   = require('fs');
-
-const fakevCard     = require('../lib/fakevcard');
-const BOT_NAME       = process.env.BOT_NAME       || '🔥 REDXBOT302 🔥';
-const NEWSLETTER_JID = process.env.NEWSLETTER_JID || '120363405513439052@newsletter';
-
-const ctxInfo = () => ({
-  forwardingScore: 999,
-  isForwarded: true,
-  forwardedNewsletterMessageInfo: { newsletterJid: NEWSLETTER_JID, newsletterName: `🔥 ${BOT_NAME}`, serverMessageId: 200 },
-});
-
-const getGroupMeta  = (conn, from)    => conn.groupMetadata(from);
-const checkAdmin    = async (conn, from, sender) => {
-  const meta  = await getGroupMeta(conn, from);
-  const p     = meta.participants.find(x => x.id === sender);
-  const isAdm = p?.admin === 'admin' || p?.admin === 'superadmin';
-  const isBot = conn.user.id.split(':')[0] === sender.split('@')[0];
-  if (!isAdm && !isBot) throw new Error('❌ Only admins can use this command.');
-  return meta;
+const cat = 'groups';
+const CH = {
+  contextInfo: {
+    forwardingScore: 1, isForwarded: true,
+    forwardedNewsletterMessageInfo: {
+      newsletterJid: '120363405513439052@newsletter',
+      newsletterName: 'REDXBOT302', serverMessageId: -1
+    }
+  }
 };
 
-const sendOk = async (conn, from, text, mentions = [], key) => {
-  if (key) await conn.sendMessage(from, { react: { text: '✅', key } });
-  await conn.sendMessage(from, { text, mentions, contextInfo: ctxInfo() }, { quoted: fakevCard });
-};
+async function getGroupMeta(sock, jid) {
+  try { return await sock.groupMetadata(jid); } catch { return null; }
+}
 
-module.exports = [
-  // ── KICK
-  {
-    pattern: 'kick',
-    alias: ['remove'],
-    desc: 'Kick a member from group',
-    category: 'Group',
-    react: '👢',
-    use: '.kick @user',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only command.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const target = m.mentionedJid?.[0] || m.quoted?.sender;
-        if (!target) return reply('❌ Mention or reply to user to kick.');
-        await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-        await conn.groupParticipantsUpdate(from, [target], 'remove');
-        await sendOk(conn, from, `👢 @${target.split('@')[0]} has been kicked!\n\n> 🔥 ${BOT_NAME}`, [target], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+const plugins = [
 
-  // ── PROMOTE
-  {
-    pattern: 'promote',
-    desc: 'Promote member to admin',
-    category: 'Group',
-    react: '⬆️',
-    use: '.promote @user',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only command.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const target = m.mentionedJid?.[0] || m.quoted?.sender;
-        if (!target) return reply('❌ Mention or reply to user.');
-        await conn.groupParticipantsUpdate(from, [target], 'promote');
-        await sendOk(conn, from, `⬆️ @${target.split('@')[0]} promoted to admin! 👑\n\n> 🔥 ${BOT_NAME}`, [target], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'kick', aliases: ['remove', 'ban'], category: cat,
+  description: 'Kick a member from the group', usage: '.kick @user',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const mentioned = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const quoted = message.message?.extendedTextMessage?.contextInfo?.participant;
+    const targets = mentioned.length ? mentioned : (quoted ? [quoted] : []);
+    if (!targets.length) return sock.sendMessage(chatId, { text: '❌ Mention someone to kick!', ...CH }, { quoted: message });
+    try {
+      await sock.groupParticipantsUpdate(chatId, targets, 'remove');
+      await sock.sendMessage(chatId, { text: `✅ *Kicked ${targets.length} member(s)*`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed to kick: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── DEMOTE
-  {
-    pattern: 'demote',
-    desc: 'Demote admin to member',
-    category: 'Group',
-    react: '⬇️',
-    use: '.demote @user',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only command.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const target = m.mentionedJid?.[0] || m.quoted?.sender;
-        if (!target) return reply('❌ Mention or reply to user.');
-        await conn.groupParticipantsUpdate(from, [target], 'demote');
-        await sendOk(conn, from, `⬇️ @${target.split('@')[0]} has been demoted.\n\n> 🔥 ${BOT_NAME}`, [target], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'promote', aliases: ['admin', 'makeadmin'], category: cat,
+  description: 'Promote a member to admin', usage: '.promote @user',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const mentioned = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (!mentioned.length) return sock.sendMessage(chatId, { text: '❌ Mention someone to promote!', ...CH }, { quoted: message });
+    try {
+      await sock.groupParticipantsUpdate(chatId, mentioned, 'promote');
+      await sock.sendMessage(chatId, { text: `✅ *Promoted to admin!*`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── TAGALL
-  {
-    pattern: 'tagall',
-    desc: 'Tag all group members',
-    category: 'Group',
-    react: '📢',
-    use: '.tagall [message]',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender, q }) => {
-      if (!isGroup) return reply('❌ Group only command.');
-      try {
-        const meta    = await getGroupMeta(conn, from);
-        const members = meta.participants.map(p => p.id);
-        const text    = q || '📢 Attention everyone!';
-        const mentions = members.join(' ');
-        const tagList  = members.map(id => `@${id.split('@')[0]}`).join('\n');
+{
+  command: 'demote', aliases: ['removeadmin', 'unadmin'], category: cat,
+  description: 'Demote an admin to member', usage: '.demote @user',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const mentioned = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (!mentioned.length) return sock.sendMessage(chatId, { text: '❌ Mention someone to demote!', ...CH }, { quoted: message });
+    try {
+      await sock.groupParticipantsUpdate(chatId, mentioned, 'demote');
+      await sock.sendMessage(chatId, { text: `✅ *Demoted from admin!*`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-        await conn.sendMessage(from, {
-          text: `📢 *${text}*\n\n${tagList}\n\n> 🔥 ${BOT_NAME}`,
-          mentions: members,
-          contextInfo: ctxInfo(),
-        }, { quoted: fakevCard });
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'mute', aliases: ['close', 'lock'], category: cat,
+  description: 'Mute the group (only admins can send)', usage: '.mute',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    try {
+      await sock.groupSettingUpdate(chatId, 'announcement');
+      await sock.sendMessage(chatId, { text: '🔇 *Group Muted!* Only admins can send messages.', ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── MUTE
-  {
-    pattern: 'mute',
-    desc: 'Mute group (only admins can send)',
-    category: 'Group',
-    react: '🔇',
-    use: '.mute',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        await checkAdmin(conn, from, sender);
-        await conn.groupSettingUpdate(from, 'announcement');
-        await sendOk(conn, from, `🔇 Group muted! Only admins can send messages.\n\n> 🔥 ${BOT_NAME}`, [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'unmute', aliases: ['open', 'unlock'], category: cat,
+  description: 'Unmute the group (all can send)', usage: '.unmute',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    try {
+      await sock.groupSettingUpdate(chatId, 'not_announcement');
+      await sock.sendMessage(chatId, { text: '🔊 *Group Unmuted!* Everyone can now send messages.', ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── UNMUTE
-  {
-    pattern: 'unmute',
-    alias: ['open'],
-    desc: 'Unmute group',
-    category: 'Group',
-    react: '🔊',
-    use: '.unmute',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        await checkAdmin(conn, from, sender);
-        await conn.groupSettingUpdate(from, 'not_announcement');
-        await sendOk(conn, from, `🔊 Group unmuted! Everyone can send messages.\n\n> 🔥 ${BOT_NAME}`, [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'tagall', aliases: ['everyone', 'all', 'tag'], category: cat,
+  description: 'Tag all members in the group', usage: '.tagall [message]',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const meta = await getGroupMeta(sock, chatId);
+    if (!meta) return sock.sendMessage(chatId, { text: '❌ Could not fetch group info.', ...CH }, { quoted: message });
+    const msg = args.join(' ') || '📢 Attention everyone!';
+    const mentions = meta.participants.map(p => p.id);
+    const text = `*${msg}*\n\n` + mentions.map(m => `@${m.split('@')[0]}`).join(' ');
+    await sock.sendMessage(chatId, { text, mentions, ...CH }, { quoted: message });
+  }
+},
 
-  // ── GROUP INFO
-  {
-    pattern: 'groupinfo',
-    alias: ['gcinfo'],
-    desc: 'Get group information',
-    category: 'Group',
-    react: 'ℹ️',
-    use: '.groupinfo',
-    execute: async (conn, msg, m, { from, isGroup, reply }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        const meta    = await getGroupMeta(conn, from);
-        const admins  = meta.participants.filter(p => p.admin).map(p => `@${p.id.split('@')[0]}`).join(', ');
-        const created = new Date(meta.creation * 1000).toLocaleDateString();
-        await conn.sendMessage(from, {
-          text:
-`╔══════════════════════════╗
-║   ℹ️ *GROUP INFORMATION*   ║
-╚══════════════════════════╝
+{
+  command: 'hidetag', aliases: ['stag', 'silentall'], category: cat,
+  description: 'Tag all members silently', usage: '.hidetag <message>',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const meta = await getGroupMeta(sock, chatId);
+    if (!meta) return sock.sendMessage(chatId, { text: '❌ Could not fetch group info.', ...CH }, { quoted: message });
+    const msg = args.join(' ') || '👋';
+    const mentions = meta.participants.map(p => p.id);
+    await sock.sendMessage(chatId, { text: msg, mentions, ...CH }, { quoted: message });
+  }
+},
 
-📌 *Name:* ${meta.subject}
-👥 *Members:* ${meta.participants.length}
-📅 *Created:* ${created}
-👑 *Admins:* ${admins || 'None'}
-📝 *Description:*
-${meta.desc || 'No description'}
+{
+  command: 'groupinfo', aliases: ['ginfo', 'gcinfo'], category: cat,
+  description: 'Get group information', usage: '.groupinfo',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const meta = await getGroupMeta(sock, chatId);
+    if (!meta) return sock.sendMessage(chatId, { text: '❌ Failed to get info.', ...CH }, { quoted: message });
+    const admins = meta.participants.filter(p => p.admin).length;
+    await sock.sendMessage(chatId, {
+      text: `👥 *Group Information*\n\n📌 *Name:* ${meta.subject}\n🆔 *ID:* ${chatId}\n👤 *Members:* ${meta.participants.length}\n👑 *Admins:* ${admins}\n📅 *Created:* ${new Date(meta.creation * 1000).toLocaleString()}\n📝 *Desc:* ${meta.desc?.substring(0, 200) || 'No description'}`,
+      ...CH
+    }, { quoted: message });
+  }
+},
 
-> 🔥 ${BOT_NAME}`,
-          mentions: meta.participants.filter(p => p.admin).map(p => p.id),
-          contextInfo: ctxInfo(),
-        }, { quoted: fakevCard });
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'invitelink', aliases: ['invite', 'link'], category: cat,
+  description: 'Get group invite link', usage: '.invitelink',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    try {
+      const code = await sock.groupInviteCode(chatId);
+      await sock.sendMessage(chatId, { text: `🔗 *Group Invite Link*\n\nhttps://chat.whatsapp.com/${code}`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── INVITE LINK
-  {
-    pattern: 'invitelink',
-    alias: ['invlink'],
-    desc: 'Get group invite link',
-    category: 'Group',
-    react: '🔗',
-    use: '.invitelink',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const code = await conn.groupInviteCode(from);
-        await sendOk(conn, from,
-          `🔗 *Group Invite Link*\n\nhttps://chat.whatsapp.com/${code}\n\n> 🔥 ${BOT_NAME}`,
-          [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'resetlink', aliases: ['revoke', 'revokelink'], category: cat,
+  description: 'Reset group invite link', usage: '.resetlink',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    try {
+      await sock.groupRevokeInvite(chatId);
+      await sock.sendMessage(chatId, { text: '✅ *Invite link reset!* Old link is now invalid.', ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── RESET LINK
-  {
-    pattern: 'resetlink',
-    desc: 'Reset group invite link',
-    category: 'Group',
-    react: '🔄',
-    use: '.resetlink',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const code = await conn.groupRevokeInvite(from);
-        await sendOk(conn, from,
-          `🔄 *Link Reset!*\n\nhttps://chat.whatsapp.com/${code}\n\n> 🔥 ${BOT_NAME}`,
-          [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'setgname', aliases: ['rename', 'groupname'], category: cat,
+  description: 'Change group name', usage: '.setgname <name>',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const name = args.join(' ');
+    if (!name) return sock.sendMessage(chatId, { text: '❌ Usage: .setgname <new name>', ...CH }, { quoted: message });
+    try {
+      await sock.groupUpdateSubject(chatId, name);
+      await sock.sendMessage(chatId, { text: `✅ *Group name changed to:* ${name}`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── SET GROUP NAME
-  {
-    pattern: 'setgname',
-    alias: ['setname'],
-    desc: 'Set group name',
-    category: 'Group',
-    react: '✏️',
-    use: '.setgname New Name',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender, q }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      if (!q) return reply('❌ Provide a new name.');
-      try {
-        await checkAdmin(conn, from, sender);
-        await conn.groupUpdateSubject(from, q);
-        await sendOk(conn, from, `✏️ Group name changed to: *${q}*\n\n> 🔥 ${BOT_NAME}`, [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'setgdesc', aliases: ['desc', 'groupdesc'], category: cat,
+  description: 'Change group description', usage: '.setgdesc <description>',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    if (!chatId.endsWith('@g.us')) return sock.sendMessage(chatId, { text: '❌ Group command only!', ...CH }, { quoted: message });
+    const desc = args.join(' ');
+    if (!desc) return sock.sendMessage(chatId, { text: '❌ Usage: .setgdesc <description>', ...CH }, { quoted: message });
+    try {
+      await sock.groupUpdateDescription(chatId, desc);
+      await sock.sendMessage(chatId, { text: `✅ *Group description updated!*`, ...CH }, { quoted: message });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-  // ── SET GROUP DESC
-  {
-    pattern: 'setgdesc',
-    alias: ['setdesc'],
-    desc: 'Set group description',
-    category: 'Group',
-    react: '📝',
-    use: '.setgdesc New description',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender, q }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      if (!q) return reply('❌ Provide a description.');
-      try {
-        await checkAdmin(conn, from, sender);
-        await conn.groupUpdateDescription(from, q);
-        await sendOk(conn, from, `📝 Group description updated!\n\n> 🔥 ${BOT_NAME}`, [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
+{
+  command: 'warn', aliases: ['warning'], category: cat,
+  description: 'Warn a group member', usage: '.warn @user',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    const mentioned = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (!mentioned.length) return sock.sendMessage(chatId, { text: '❌ Mention someone to warn!', ...CH }, { quoted: message });
+    const reason = args.filter(a => !a.includes('@')).join(' ') || 'Violating group rules';
+    const mentions = mentioned;
+    await sock.sendMessage(chatId, {
+      text: `⚠️ *Warning Issued!*\n\n${mentions.map(m => `@${m.split('@')[0]}`).join(' ')}\n\n*Reason:* ${reason}\n\n_3 warnings = kick_`,
+      mentions, ...CH
+    }, { quoted: message });
+  }
+},
 
-  // ── ANTILINK
-  {
-    pattern: 'setlink',
-    desc: 'Toggle anti-link in group',
-    category: 'Group',
-    react: '🔗',
-    use: '.antilink on|off',
-    execute: async (conn, msg, m, { from, isGroup, reply, sender, args }) => {
-      if (!isGroup) return reply('❌ Group only.');
-      try {
-        await checkAdmin(conn, from, sender);
-        const val = args[0]?.toLowerCase();
-        if (val !== 'on' && val !== 'off') return reply('❌ Usage: .antilink on|off');
-        const dataPath = path.join(process.cwd(), 'data', 'autoAi.json');
-        let data = {};
-        try { data = JSON.parse(fs.readFileSync(dataPath, 'utf8')); } catch {}
-        data[`antilink_${from}`] = val === 'on';
-        fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+{
+  command: 'delete', aliases: ['del', 'unsend'], category: cat,
+  description: 'Delete a message (reply to it)', usage: '.delete (reply to message)',
+  async handler(sock, message, args, context) {
+    const chatId = context.chatId || message.key.remoteJid;
+    const quoted = message.message?.extendedTextMessage?.contextInfo;
+    if (!quoted) return sock.sendMessage(chatId, { text: '❌ Reply to a message to delete it.', ...CH }, { quoted: message });
+    try {
+      await sock.sendMessage(chatId, { delete: { remoteJid: chatId, id: quoted.stanzaId, participant: quoted.participant } });
+    } catch (e) {
+      await sock.sendMessage(chatId, { text: `❌ Failed to delete: ${e.message}`, ...CH }, { quoted: message });
+    }
+  }
+},
 
-        await sendOk(conn, from,
-          `🔗 Anti-Link: *${val.toUpperCase()}*\n\n> 🔥 ${BOT_NAME}`, [], msg.key);
-      } catch (e) { reply(e.message); }
-    },
-  },
 ];
+
+module.exports = plugins;
