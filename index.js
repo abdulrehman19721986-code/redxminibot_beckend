@@ -1,7 +1,7 @@
 'use strict';
 /**
- * 🔥 REDXBOT302 — FINAL EDITION v5.2
- * Full plugin system · Owner + Sudo + Paired users · All libs included
+ * 🔥 REDXBOT302 — FINAL EDITION v5.1
+ * Full plugin system · Built‑in menu removed · All plugins work
  * Owner: Abdul Rehman Rajpoot (+923009842133)
  */
 
@@ -22,14 +22,6 @@ const {
   Browsers,
 } = require('@whiskeysockets/baileys');
 const P = require('pino');
-
-// ── Load our libs ─────────────────────────────────────────
-const { fakevCard } = require('./lib/fakevcard');
-const store         = require('./lib/lightweight_store');
-const { db }        = require('./lib/database');
-const functions     = require('./lib/functions');
-const functions2    = require('./lib/functions2');
-const GroupEvents   = require('./lib/groupevents');
 
 // ── APP ─────────────────────────────────────────────────────
 const app    = express();
@@ -56,9 +48,6 @@ const NL_NAME      = '🔥 REDXBOT302 🔥';
 const WA_GROUP     = 'https://chat.whatsapp.com/LhSmx2SeXX75r8I2bxsNDo';
 const TG_GROUP     = 'https://t.me/TeamRedxhacker2';
 global.BOT_MODE    = process.env.BOT_MODE || 'public';
-
-// Sudo users (comma‑separated numbers, e.g. "1234567890,9876543210")
-const SUDO_USERS = (process.env.SUDO_USERS || '').split(',').map(n => n.trim()).filter(Boolean);
 
 let adminUsername = process.env.ADMIN_USERNAME || 'redx';
 let adminPassword = process.env.ADMIN_PASSWORD || 'redx';
@@ -138,6 +127,7 @@ const broadcastStats = () => {
 const commands   = new Map();
 const pluginsDir = path.join(__dirname, 'plugins');
 let cmdCount     = 0;
+
 const loadPlugins = () => {
   commands.clear(); cmdCount = 0;
   if (!fs.existsSync(pluginsDir)) { fs.mkdirSync(pluginsDir,{recursive:true}); return; }
@@ -149,16 +139,17 @@ const loadPlugins = () => {
       delete require.cache[require.resolve(fp)];
       const mod = require(fp);
 
-      // Normalize any plugin format into { pattern, execute, aliases, category, desc, ownerOnly }
-      const normalize = (raw) => {
+      // Normalise: converts any plugin format into { pattern, execute, aliases, category, desc, ownerOnly }
+      const normalise = (raw) => {
         if (!raw || typeof raw !== 'object') return null;
-        // Already has pattern and execute
+        // Format A: { pattern, execute, alias[] }
         if (raw.pattern && raw.execute) return raw;
-        // New format: command + handler
+        // Format B: { command, handler, aliases[] }
         if ((raw.command || raw.pattern) && (raw.handler || raw.execute)) {
           const pattern = raw.command || raw.pattern;
           const execute = raw.handler
             ? async (conn, msg, m, opts) => {
+                // Bridge to new-style handler(sock, message, args, context)
                 const context = {
                   chatId: opts.from,
                   command: pattern,
@@ -199,7 +190,7 @@ const loadPlugins = () => {
       };
 
       const register = (cmd) => {
-        const norm = normalize(cmd);
+        const norm = normalise(cmd);
         if (!norm) return;
         commands.set(norm.pattern, norm); cmdCount++;
         const aliases = Array.isArray(norm.alias) ? norm.alias : [];
@@ -209,7 +200,7 @@ const loadPlugins = () => {
       if (Array.isArray(mod)) {
         mod.forEach(register);
       } else if (mod && typeof mod === 'object') {
-        const norm = normalize(mod);
+        const norm = normalise(mod);
         if (norm) {
           register(mod);
         } else {
@@ -219,7 +210,10 @@ const loadPlugins = () => {
     } catch(e){ console.error(`Plugin ${file}: ${e.message?.slice(0,120)}`); }
   }
   console.log(`🔌 ${cmdCount} commands loaded from ${files.length} plugin files`);
-  global.botCommands = commands; // expose for allmenu.js
+  // Log first 10 commands for debugging
+  const cmdList = [...commands.keys()].slice(0, 10);
+  console.log(`   Commands: ${cmdList.join(', ')}${cmdCount>10 ? ' ...' : ''}`);
+  global.botCommands = commands; // expose for any plugin that needs it
 };
 loadPlugins();
 if (fs.existsSync(pluginsDir)) fs.watch(pluginsDir,(e,f)=>{ if(f&&f.endsWith('.js')){ console.log(`♻️ Reloading ${f}`); loadPlugins(); } });
@@ -331,14 +325,13 @@ function setupHandlers(conn, number, saveCreds) {
     }
   });
 
-  // Welcome / goodbye group events (using the provided lib)
+  // Welcome / goodbye group events
   conn.ev.on('group-participants.update', async (update) => {
     try {
+      const GroupEvents = require('./lib/groupevents');
       await GroupEvents(conn, update, {
-        botName: BOT_NAME,
-        ownerName: OWNER_NAME,
-        menuImage: BOT_IMG,
-        newsletterJid: NL_JID,
+        botName: BOT_NAME, ownerName: OWNER_NAME,
+        menuImage: BOT_IMG, newsletterJid: NL_JID,
       });
     } catch(e){ console.error('GroupEvents:', e.message); }
   });
@@ -398,30 +391,15 @@ _ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302_
 }
 
 // ════════════════════════════════════════════════════════════
-//  HELPER: Permission checks
-// ════════════════════════════════════════════════════════════
-function isOwnerNumber(number) {
-  const num = number.replace(/[^0-9]/g,'');
-  return num === OWNER_NUM || num === CO_OWNER_NUM || SUDO_USERS.includes(num);
-}
-
-function isPairedNumber(number) {
-  const num = number.replace(/[^0-9]/g,'');
-  // Has ever paired (deploys registry) OR currently has active connection
-  return (deploys[DEPLOY_ID]?.numbers?.includes(num) || activeConnections.has(num));
-}
-
-// ════════════════════════════════════════════════════════════
 //  MESSAGE HANDLER
 // ════════════════════════════════════════════════════════════
 async function handleMessage(conn, msg, sessionId) {
   const from    = msg.key.remoteJid;
   const sender  = msg.key.participant || msg.key.remoteJid;
   const sNum    = sender.split('@')[0].split(':')[0];
-  const isOwner = isOwnerNumber(sNum);
-  const isPaired = isPairedNumber(sNum);
+  const isOwner = sNum === OWNER_NUM || sNum === CO_OWNER_NUM || sNum === sessionId;
 
-  // Status messages: always auto‑view/react if enabled
+  // Status messages: auto‑view/react
   if (from === 'status@broadcast') {
     if (process.env.AUTO_STATUS_SEEN !== 'false') await conn.readMessages([msg.key]).catch(()=>{});
     if (process.env.AUTO_STATUS_REACT !== 'false') {
@@ -432,12 +410,7 @@ async function handleMessage(conn, msg, sessionId) {
   }
   if (from?.endsWith('@newsletter')) return;
   if (!msg.message) return;
-
-  // Mode check
   if (global.BOT_MODE === 'private' && !isOwner) return;
-
-  // Allow only paired users (or owners) to use commands
-  if (!isOwner && !isPaired) return; // silently ignore
 
   const body = msg.message?.conversation
     || msg.message?.extendedTextMessage?.text
@@ -452,10 +425,10 @@ async function handleMessage(conn, msg, sessionId) {
   const cmd  = args.shift().toLowerCase();
   const q    = body.slice(pfx.length + cmd.length).trim();
 
-  console.log(`[${new Date().toLocaleTimeString()}] ${pfx}${cmd} | ${sNum} (owner:${isOwner}, paired:${isPaired})`);
+  console.log(`[${new Date().toLocaleTimeString()}] ${pfx}${cmd} | ${sNum}`);
 
-  // Built‑in commands (owner‑only or paired‑only)
-  if (await runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, isPaired, pfx)) return;
+  // Try built‑in commands (only essential ones, no menu)
+  if (await runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, pfx)) return;
 
   // Plugin commands
   if (commands.has(cmd)) {
@@ -466,55 +439,18 @@ async function handleMessage(conn, msg, sessionId) {
       return;
     }
     try {
-      // Helper reply function that adds the proper contextInfo
-      const reply = async (text, opts = {}) => {
-        const ctx = {
-          text,
-          contextInfo: {
-            forwardingScore: 999,
-            isForwarded: true,
-            forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: NL_NAME, serverMessageId: -1 },
-            ...(opts.contextInfo || {}),
-          },
-        };
-        if (opts.mentions) ctx.contextInfo.mentionedJid = opts.mentions;
-        return conn.sendMessage(from, ctx, { quoted: msg });
-      };
-
+      const reply   = (text, opts={}) => conn.sendMessage(from,{text},{quoted:msg,...opts});
       const isGroup = from.endsWith('@g.us');
       let gMeta = null;
+      if (isGroup) { try { gMeta = await conn.groupMetadata(from); } catch {} }
       let isAdmin = false;
-      if (isGroup) {
-        try { gMeta = await conn.groupMetadata(from); } catch {}
-        if (gMeta) {
-          const participant = gMeta.participants.find(p => p.id === sender);
-          isAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
-        }
-      }
+      if (isGroup && gMeta) { const p = gMeta.participants.find(p=>p.id===sender); isAdmin = p?.admin==='admin'||p?.admin==='superadmin'; }
       const quoted = getQuoted(msg);
       const pluginOpts = {
         args, q, reply, from, isGroup, groupMetadata: gMeta,
-        sender, isAdmin, isOwner, isPaired,
-        botName: BOT_NAME, ownerName: OWNER_NAME,
+        sender, isAdmin, isOwner, botName: BOT_NAME, ownerName: OWNER_NAME,
         prefix: pfx, senderNumber: sNum,
         chatId: from, deployId: DEPLOY_ID,
-        config: {
-          botName: BOT_NAME,
-          ownerName: OWNER_NAME,
-          ownerNumber: OWNER_NUM,
-          coOwner: CO_OWNER,
-          coOwnerNumber: CO_OWNER_NUM,
-          prefix: pfx,
-          mode: global.BOT_MODE,
-          platform: detectPlatform(),
-        },
-        channelInfo: {
-          contextInfo: {
-            forwardingScore: 999,
-            isForwarded: true,
-            forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: NL_NAME, serverMessageId: -1 },
-          },
-        },
       };
       await plugin.execute(conn, msg, {
         mentionedJid: msg.message?.extendedTextMessage?.contextInfo?.mentionedJid||[],
@@ -526,9 +462,11 @@ async function handleMessage(conn, msg, sessionId) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  BUILT‑IN COMMANDS (respect permissions)
+//  BUILT‑IN COMMANDS (only essential ones – no menu)
 // ════════════════════════════════════════════════════════════
-async function runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, isPaired, pfx) {
+const fakevCard = require('./lib/fakevcard');
+
+async function runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, pfx) {
   const dep = deploys[DEPLOY_ID];
   const nlCtx = {
     forwardingScore: 999, isForwarded: true,
@@ -539,6 +477,7 @@ async function runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, isPair
 
   switch(cmd) {
     case 'ping':
+    case 'speed':
       const t = Date.now();
       await conn.sendMessage(from, { react: { text: '⚡', key: msg.key } });
       await s(`⚡ *ᴘɪɴɢ:* \`${Date.now()-t}ms\`\n\n> 🔥 ${BOT_NAME}`);
@@ -548,7 +487,7 @@ async function runBuiltIn(conn, msg, cmd, args, q, from, sender, isOwner, isPair
       await conn.sendMessage(from, {
         contacts: { displayName: OWNER_NAME, contacts: [{ vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${OWNER_NAME}\nTEL;type=CELL;waid=${OWNER_NUM}:+${OWNER_NUM}\nEND:VCARD` }] }
       }, { quoted: msg });
-      await s(`👑 *ᴏᴡɴᴇʀ:* ${OWNER_NAME}\n📱 *ɴᴜᴍ:* +${OWNER_NUM}\n👤 *ᴄᴏ:* ${CO_OWNER}\n🛡️ *Sudo:* ${SUDO_USERS.join(', ') || 'none'}\n\n> 🔥 ${BOT_NAME}`);
+      await s(`👑 *ᴏᴡɴᴇʀ:* ${OWNER_NAME}\n📱 *ɴᴜᴍ:* +${OWNER_NUM}\n👤 *ᴄᴏ:* ${CO_OWNER}\n\n> 🔥 ${BOT_NAME}`);
       return true;
 
     case 'mode':
@@ -592,7 +531,7 @@ function getQuoted(msg) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  EXPRESS ROUTES — PUBLIC
+//  EXPRESS ROUTES — PUBLIC (unchanged)
 // ════════════════════════════════════════════════════════════
 app.get('/', (req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.get('/api/status', (req,res)=>res.json({
@@ -707,7 +646,7 @@ app.get('/api/deploy/:id',(req,res)=>{
 });
 
 // ════════════════════════════════════════════════════════════
-//  USER DEPLOY KEY API
+//  USER DEPLOY KEY API (unchanged)
 // ════════════════════════════════════════════════════════════
 function deployKeyAuth(req, res, next) {
   const key = req.headers['x-deploy-key'] || req.body?.deployKey || req.query?.key;
@@ -764,7 +703,7 @@ app.get('/api/user/status', deployKeyAuth, (req,res) => {
 });
 
 // ════════════════════════════════════════════════════════════
-//  ADMIN ROUTES
+//  ADMIN ROUTES (unchanged)
 // ════════════════════════════════════════════════════════════
 const adminAuth = (req,res,next) => {
   const token = req.headers['x-admin-token']||req.query.token;
@@ -786,7 +725,7 @@ app.post('/api/admin/logout',adminAuth,(req,res)=>{ adminSessions.delete(req.hea
 app.get('/api/admin/overview',adminAuth,(req,res)=>res.json({
   stats:{ totalDeploys:Object.keys(deploys).length, totalPairs:statsData.pairCount, totalUsers:statsData.totalUsers, uptime:Math.floor((Date.now()-START_TIME)/1000) },
   currentDeploy: deploys[DEPLOY_ID], servers, platform:detectPlatform(),
-  adminUser:req.adminSession.user, botVersion:'5.2.0', nodeVersion:process.version, memUsage:process.memoryUsage(), activeConnections:activeConnections.size,
+  adminUser:req.adminSession.user, botVersion:'5.1.0', nodeVersion:process.version, memUsage:process.memoryUsage(), activeConnections:activeConnections.size,
 }));
 
 app.get('/api/admin/deploys',adminAuth,(req,res)=>res.json({deploys:Object.values(deploys)}));
@@ -883,14 +822,12 @@ app.get('/health', (req, res) => res.json({
 // ── START ─────────────────────────────────────────────────────
 server.listen(PORT, async () => {
   console.log(`\n╔════════════════════════════════════════════════════╗`);
-  console.log(`║  🔥 REDXBOT302 FINAL EDITION v5.2                  ║`);
+  console.log(`║  🔥 REDXBOT302 FINAL EDITION v5.1                  ║`);
   console.log(`║  🌐 http://localhost:${String(PORT).padEnd(26)}║`);
   console.log(`║  🆔 Deploy ID: ${String(DEPLOY_ID).padEnd(34)}║`);
   console.log(`║  🔑 Deploy Key: ${String(deploys[DEPLOY_ID]?.deployKey||'—').slice(0,20).padEnd(33)}║`);
   console.log(`║  🌐 Platform:  ${String(detectPlatform()).padEnd(34)}║`);
   console.log(`║  🔌 Commands:  ${String(cmdCount+'+ loaded').padEnd(34)}║`);
-  console.log(`║  👑 Owner:     ${OWNER_NUM} / ${CO_OWNER_NUM}                ║`);
-  console.log(`║  🛡️ Sudo:      ${SUDO_USERS.join(', ') || 'none'}                ║`);
   console.log(`╚════════════════════════════════════════════════════╝\n`);
   await reloadExistingSessions();
   startKeepAlive();
@@ -931,3 +868,5 @@ function getStats() {
     prefix: deploys[DEPLOY_ID]?.prefix || PREFIX,
   };
 }
+
+module.exports = { app, server, io };
