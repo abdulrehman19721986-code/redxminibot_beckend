@@ -1,6 +1,7 @@
+// plugins/video.js
 const yts = require('yt-search');
 const fs = require('fs');
-const yt = require('../lib/ytdownloader'); // our new downloader
+const yt = require('../lib/ytdownloader');
 const CH = {
   contextInfo: {
     forwardingScore: 1, isForwarded: true,
@@ -66,7 +67,7 @@ module.exports = {
         await sock.sendMessage(chatId, { react: { text: '📥', key: msg.key } });
 
         try {
-          // Download video using YTDownloader (720p or highest)
+          // Download video using YTDownloader (720p)
           const filePath = await yt.downloadVideo(videoUrl, '720');
           const videoBuffer = fs.readFileSync(filePath);
           fs.unlinkSync(filePath); // clean up temp file
