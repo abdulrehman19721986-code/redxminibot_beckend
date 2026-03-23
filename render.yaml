@@ -9,5 +9,3 @@ services:
         value: 🔥 REDXBOT302 🔥
       - key: PREFIX
         value: "."
-      - key: BOT_MODE
-        value: public
