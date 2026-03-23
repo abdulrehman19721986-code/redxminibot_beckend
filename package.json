@@ -1,14 +1,14 @@
 {
   "name": "redxbot302",
-  "version": "5.0.0",
-  "description": "\ud83d\udd25 REDXBOT302 \u2014 WhatsApp Bot. Pair-only. No SESSION_ID. 200+ commands.",
+  "version": "5.1.0",
+  "description": "🔥 REDXBOT302 — WhatsApp Bot. Pair-only. No SESSION_ID. 200+ commands.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "heroku-postbuild": "echo '\u2705 REDXBOT302 build complete'",
-    "build": "echo '\u2705 No build step required'"
+    "heroku-postbuild": "echo '✅ REDXBOT302 build complete'",
+    "build": "echo '✅ No build step required'"
   },
   "engines": {
     "node": "20.x",
@@ -22,6 +22,7 @@
   "author": "Abdul Rehman Rajpoot",
   "license": "MIT",
   "dependencies": {
+    "@distube/ytdl-core": "^4.13.5",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@hapi/boom": "^10.0.1",
     "@iamtraction/google-translate": "^2.0.1",
@@ -39,6 +40,8 @@
     "jimp": "^0.22.12",
     "node-cache": "^5.1.2",
     "node-fetch": "^2.7.0",
+    "node-id3": "^0.2.6",
+    "node-youtube-music": "^1.2.8",
     "pino": "^9.9.0",
     "qrcode": "^1.5.3",
     "socket.io": "^4.8.1",
