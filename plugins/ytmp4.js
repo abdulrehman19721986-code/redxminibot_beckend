@@ -1,5 +1,6 @@
-const axios = require('axios');
 const yts = require('yt-search');
+const fs = require('fs');
+const yt = require('../lib/ytdownloader'); // our new downloader
 const CH = {
   contextInfo: {
     forwardingScore: 1, isForwarded: true,
@@ -10,25 +11,6 @@ const CH = {
     },
   },
 };
-
-async function getVideo(url) {
-  const apis = [
-    `https://izumiiiiiiii.dpdns.org/downloader/youtube?url=${encodeURIComponent(url)}&format=720`,
-    `https://okatsu-rolezapiiz.vercel.app/downloader/ytmp4?url=${encodeURIComponent(url)}`,
-    `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(url)}`,
-    `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodeURIComponent(url)}`,
-  ];
-  for (const api of apis) {
-    try {
-      const { data } = await axios.get(api, { timeout: 30000 });
-      if (data?.result?.download) return data.result.download;
-      if (data?.result?.mp4) return data.result.mp4;
-      if (data?.data?.url) return data.data.url;
-      if (data?.url) return data.url;
-    } catch (e) {}
-  }
-  throw new Error('All download APIs failed');
-}
 
 module.exports = {
   command: 'video',
@@ -84,18 +66,20 @@ module.exports = {
         await sock.sendMessage(chatId, { react: { text: '📥', key: msg.key } });
 
         try {
-          const downloadUrl = await getVideo(videoUrl);
-          if (!downloadUrl) throw new Error('No download URL');
+          // Download video using YTDownloader (720p or highest)
+          const filePath = await yt.downloadVideo(videoUrl, '720');
+          const videoBuffer = fs.readFileSync(filePath);
+          fs.unlinkSync(filePath); // clean up temp file
 
           if (choice === '1') {
             await sock.sendMessage(chatId, {
-              video: { url: downloadUrl },
+              video: videoBuffer,
               caption: info.title,
               ...CH,
             }, { quoted: msg });
           } else if (choice === '2') {
             await sock.sendMessage(chatId, {
-              document: { url: downloadUrl },
+              document: videoBuffer,
               mimetype: 'video/mp4',
               fileName: `${info.title}.mp4`,
               caption: info.title,
@@ -103,7 +87,7 @@ module.exports = {
             }, { quoted: msg });
           } else if (choice === '3') {
             await sock.sendMessage(chatId, {
-              video: { url: downloadUrl },
+              video: videoBuffer,
               mimetype: 'video/mp4',
               ptv: true,
               ...CH,
@@ -112,6 +96,7 @@ module.exports = {
 
           await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } });
         } catch (err) {
+          console.error('Download error:', err);
           await sock.sendMessage(chatId, {
             text: `❌ Download failed: ${err.message}`,
             ...CH,
