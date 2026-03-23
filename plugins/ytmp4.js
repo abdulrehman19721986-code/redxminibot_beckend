@@ -1,170 +1,143 @@
-const axios = require("axios");
-const yts = require("yt-search");
-const fakevCard = require('../lib/fakevcard');
+// plugins/video.js (or ytmp4.js)
+const axios = require('axios');
+const yts = require('yt-search');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-const AXIOS_DEFAULTS = {
-    timeout: 60000,
-    headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'application/json'
+const CH = {
+    contextInfo: {
+        forwardingScore: 1,
+        isForwarded: true,
+        forwardedNewsletterMessageInfo: {
+            newsletterJid: '120363405513439052@newsletter',
+            newsletterName: 'REDXBOT302',
+            serverMessageId: -1
+        }
     }
 };
 
-async function tryRequest(getter, attempts = 3) {
-    let last;
-    for (let i = 1; i <= attempts; i++) {
+// Fallback download APIs
+async function getVideo(url) {
+    const apis = [
+        `https://izumiiiiiiii.dpdns.org/downloader/youtube?url=${encodeURIComponent(url)}&format=720`,
+        `https://okatsu-rolezapiiz.vercel.app/downloader/ytmp4?url=${encodeURIComponent(url)}`,
+        `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(url)}`
+    ];
+    for (const api of apis) {
         try {
-            return await getter();
-        } catch (e) {
-            last = e;
-            if (i < attempts) await new Promise(r => setTimeout(r, 1000 * i));
-        }
+            const { data } = await axios.get(api, { timeout: 30000 });
+            if (data?.result?.download) return data.result.download;
+            if (data?.result?.mp4) return data.result.mp4;
+            if (data?.data?.url) return data.data.url;
+            if (data?.url) return data.url;
+        } catch (e) {}
     }
-    throw last;
+    throw new Error('All download APIs failed');
 }
-
-async function getIzumiVideoByUrl(url) {
-    const api = `https://izumiiiiiiii.dpdns.org/downloader/youtube?url=${encodeURIComponent(url)}&format=720`;
-    const res = await tryRequest(() => axios.get(api, AXIOS_DEFAULTS));
-    if (res?.data?.result?.download) return res.data.result;
-    throw new Error("Izumi API has no download link");
-}
-
-async function getOkatsuVideoByUrl(url) {
-    const api = `https://okatsu-rolezapiiz.vercel.app/downloader/ytmp4?url=${encodeURIComponent(url)}`;
-    const res = await tryRequest(() => axios.get(api, AXIOS_DEFAULTS));
-    if (res?.data?.result?.mp4) {
-        return {
-            download: res.data.result.mp4,
-            title: res.data.result.title
-        };
-    }
-    throw new Error("Okatsu API has no mp4");
-}
-
-const activeReplyHandlers = new Map(); 
 
 module.exports = {
-    pattern: "video",
-    alias: ["ytvideo", "ytv", "ytmp4"],
-    desc: "Download YouTube videos by name or link",
-    react: "🎬",
-    category: "downloader",
-    filename: __filename,
+    command: 'video',
+    aliases: ['ytvideo', 'ytv', 'ytmp4'],
+    category: 'downloader',
+    description: 'Download YouTube video',
+    usage: '.video <song name or URL>',
+    async handler(sock, message, args, context) {
+        const { chatId, channelInfo } = context;
+        const query = args.join(' ');
+        if (!query) return sock.sendMessage(chatId, { text: '❌ Usage: .video <song name or URL>', ...CH }, { quoted: message });
 
-    execute: async (conn, mek, m, { from, args, q, reply }) => {
+        await sock.sendMessage(chatId, { react: { text: '🎬', key: message.key } });
+
         try {
-            const text = m?.message?.conversation || m?.message?.extendedTextMessage?.text || args.join(" ");
-            const query = q || text.split(" ").slice(1).join(" ").trim();
-
-            if (!query) {
-                return await conn.sendMessage(
-                    from,
-                    { text: "⚠️ Please provide a video name or URL.\n\nExample:\n.video pasoori" },
-                    { quoted: mek }
-                );
+            let videoUrl = query;
+            if (!query.includes('youtube.com') && !query.includes('youtu.be')) {
+                const search = await yts(query);
+                if (!search?.videos?.length) throw new Error('No results');
+                videoUrl = search.videos[0].url;
             }
 
-            await conn.sendMessage(from, { react: { text: "🎬", key: mek.key } });
+            const info = await yts(videoUrl);
+            const videoInfo = info.videos[0] || (await yts(videoUrl)).videos[0];
 
-            const search = await yts(query);
-            if (!search?.videos?.length) {
-                return await conn.sendMessage(from, { text: "❌ No video found!" }, { quoted: mek });
-            }
-            const info = search.videos[0];
-            const videoUrl = info.url;
+            const caption = `☘️ *Title* ☛ ${videoInfo.title}\n` +
+                `▫️⏱️ *Duration* ☛ ${videoInfo.timestamp}\n` +
+                `▫️👁️ *Views* ☛ ${videoInfo.views?.toLocaleString()}\n` +
+                `▫️👤 *Channel* ☛ ${videoInfo.author?.name}\n\n` +
+                `🔢 *Reply with the number to download:*\n\n` +
+                `1 🎬 Normal Video (Gallery)\n` +
+                `2 📁 Document File (File)\n` +
+                `3 📹 Video Note (PTV)\n\n` +
+                `> *Powered by REDXBOT302*`;
 
-            // --- Menu Caption Updated ---
-            const caption = `☘️ *𝗧ɪᴛ𝗹𝗲* ☛ *_${info.title}_*
-
-*▫️⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻* ☛ *_${info.timestamp}_*
-*▫️👁️ 𝗩𝗶𝗲𝘄𝘀* ☛ *_${info.views?.toLocaleString()}_*
-*▫️👤 𝗖𝗵𝗮𝗻𝗻𝗲𝗹* ☛ *_${info.author?.name}_*
-
-✦━━━━━━━━━━━━✦
-
-🔢 *Reply with the number to download:*
-
-*1 🎬 Normal Video (Gallery)*
-*2 📁 Document File (File)*
-*3 📹 Video Note (PTV)*
-
-> ● *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302* ●`;
-
-            const sentMsg = await conn.sendMessage(
-                from,
-                { image: { url: info.thumbnail }, caption: caption },
-                { quoted: mek }
-            );
+            const sentMsg = await sock.sendMessage(chatId, {
+                image: { url: videoInfo.thumbnail },
+                caption,
+                ...CH
+            }, { quoted: message });
 
             const msgId = sentMsg.key.id;
-            if (activeReplyHandlers.has(msgId)) return;
 
-            const messageListener = async (messageUpdate) => {
+            const listener = async (update) => {
+                const msg = update.messages?.[0];
+                if (!msg?.message) return;
+
+                const replyTo = msg.message.extendedTextMessage?.contextInfo?.stanzaId;
+                if (replyTo !== msgId) return;
+
+                const choice = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+                if (!['1', '2', '3'].includes(choice)) return;
+
+                // Remove listener immediately
+                sock.ev.off('messages.upsert', listener);
+
+                await sock.sendMessage(chatId, { react: { text: '📥', key: msg.key } });
+
                 try {
-                    const mekUpdate = messageUpdate.messages?.[0];
-                    if (!mekUpdate?.message) return;
+                    const downloadUrl = await getVideo(videoUrl);
+                    if (!downloadUrl) throw new Error('No download URL');
 
-                    const replyTo = mekUpdate.message.extendedTextMessage?.contextInfo?.stanzaId;
-                    if (replyTo !== msgId) return;
-
-                    const choice = (mekUpdate.message.conversation || mekUpdate.message.extendedTextMessage?.text)?.trim();
-                    if (!["1", "2", "3"].includes(choice)) return;
-
-                    await conn.sendMessage(from, { react: { text: "📥", key: mekUpdate.key } });
-
-                    let videoData;
-                    try {
-                        videoData = await getIzumiVideoByUrl(videoUrl);
-                    } catch (e1) {
-                        videoData = await getOkatsuVideoByUrl(videoUrl);
+                    if (choice === '1') {
+                        await sock.sendMessage(chatId, {
+                            video: { url: downloadUrl },
+                            caption: videoInfo.title,
+                            ...CH
+                        }, { quoted: msg });
+                    } else if (choice === '2') {
+                        await sock.sendMessage(chatId, {
+                            document: { url: downloadUrl },
+                            mimetype: 'video/mp4',
+                            fileName: `${videoInfo.title}.mp4`,
+                            caption: videoInfo.title,
+                            ...CH
+                        }, { quoted: msg });
+                    } else if (choice === '3') {
+                        await sock.sendMessage(chatId, {
+                            video: { url: downloadUrl },
+                            mimetype: 'video/mp4',
+                            ptv: true,
+                            ...CH
+                        }, { quoted: msg });
                     }
 
-                    if (choice === "1") {
-                        await conn.sendMessage(from, {
-                            video: { url: videoData.download },
-                            mimetype: "video/mp4",
-                            caption: `*${info.title}*\n\n_ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302 - ʟɪᴛᴇ_`
-                        }, { quoted: mek });
-                    } 
-                    else if (choice === "2") {
-                        await conn.sendMessage(from, {
-                            document: { url: videoData.download },
-                            mimetype: "video/mp4",
-                            fileName: `${info.title}.mp4`,
-                            caption: `*${info.title}*\n\n_ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʀᴇᴅxʙᴏᴛ302 - ʟɪᴛᴇ_`
-                        }, { quoted: mek });
-                    }
-                    else if (choice === "3") {
-                        await conn.sendMessage(from, {
-                            video: { url: videoData.download },
-                            mimetype: "video/mp4",
-                            ptv: true
-                        }, { quoted: mek });
-                    }
-
-                    await conn.sendMessage(from, { react: { text: "✅", key: mekUpdate.key } });
-
+                    await sock.sendMessage(chatId, { react: { text: '✅', key: msg.key } });
                 } catch (err) {
-                    console.error("Number Reply Error:", err);
+                    await sock.sendMessage(chatId, {
+                        text: `❌ Download failed: ${err.message}`,
+                        ...CH
+                    }, { quoted: msg });
                 }
             };
 
-            conn.ev.on("messages.upsert", messageListener);
-            activeReplyHandlers.set(msgId, messageListener);
-
-            // Auto-clean listener after 10 minutes
-            setTimeout(() => {
-                const listener = activeReplyHandlers.get(msgId);
-                if (listener) {
-                    conn.ev.off("messages.upsert", listener);
-                    activeReplyHandlers.delete(msgId);
-                }
-            }, 600000);
+            sock.ev.on('messages.upsert', listener);
+            setTimeout(() => sock.ev.off('messages.upsert', listener), 10 * 60 * 1000); // auto‑cleanup
 
         } catch (err) {
-            console.error("Video Command Error:", err);
-            await conn.sendMessage(from, { text: `❌ Error: ${err.message}` }, { quoted: mek });
+            await sock.sendMessage(chatId, {
+                text: `❌ ${err.message}`,
+                ...CH
+            }, { quoted: message });
         }
     }
 };
