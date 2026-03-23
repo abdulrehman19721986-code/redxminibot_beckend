@@ -545,7 +545,11 @@ function setupConn(conn, phone, saveCreds) {
   conn.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
+      if (!msg.message) continue;
+      // Cache for antidelete (including own messages)
       try { const ad = require('./plugins/antidelete'); if (ad.cacheMessage) await ad.cacheMessage(msg); } catch {}
+      // Skip own messages — bot should not respond to itself
+      if (msg.key.fromMe) continue;
       try { await handleMsg(conn, msg, phone); } catch (e) { console.error('MsgErr:', e.message); }
     }
   });
@@ -621,9 +625,8 @@ async function handleMsg(conn, msg, phone) {
     try { const ab = require('./plugins/antibadword'); if (ab.handleAntiBadword) await ab.handleAntiBadword(conn, msg); } catch {}
   }
 
-  const type = getType(msg);
-  const body = getText(msg, type);
   const pfx  = userPrefixes.get(phone) || PREFIX;
+  const body = getText(msg).trim();
 
   // Auto-react
   try {
@@ -671,10 +674,14 @@ async function handleMsg(conn, msg, phone) {
 
   if (!body.startsWith(pfx)) return;
 
-  const parts = body.slice(pfx.length).trim().split(/\s+/);
-  const cmd   = parts.shift().toLowerCase();
-  const args  = parts;
-  const q     = body.slice(pfx.length + cmd.length).trim();
+  // Safe parse: extract command name and args correctly
+  const sliced   = body.slice(pfx.length).trim();           // e.g. "play alan walker"
+  const spaceIdx = sliced.search(/\s/);                     // first whitespace
+  const cmd      = (spaceIdx === -1 ? sliced : sliced.slice(0, spaceIdx)).toLowerCase();
+  const q        = spaceIdx === -1 ? '' : sliced.slice(spaceIdx + 1).trim();
+  const args     = q ? q.split(/\s+/) : [];
+
+  if (!cmd) return;
 
   // Typing indicator
   try {
@@ -833,12 +840,45 @@ async function sendAllMenu(conn, from, msg, pfx) {
 //  UTILS
 // ════════════════════════════════════════════════════════
 function getType(msg) {
-  const types = ['conversation','extendedTextMessage','imageMessage','videoMessage','audioMessage','documentMessage','stickerMessage'];
-  for (const t of types) if (msg.message?.[t]) return (t === 'conversation' || t === 'extendedTextMessage') ? 'TEXT' : t.replace('Message','').toUpperCase();
+  const m = msg.message;
+  if (!m) return 'UNKNOWN';
+  // Unwrap ephemeral / view-once wrappers
+  const inner = m.ephemeralMessage?.message
+    || m.viewOnceMessage?.message
+    || m.viewOnceMessageV2?.message
+    || m.documentWithCaptionMessage?.message
+    || m;
+  const types = [
+    'conversation','extendedTextMessage','imageMessage','videoMessage',
+    'audioMessage','documentMessage','stickerMessage','buttonsResponseMessage',
+    'listResponseMessage','templateButtonReplyMessage',
+  ];
+  for (const t of types) {
+    if (inner[t]) return (t === 'conversation' || t === 'extendedTextMessage') ? 'TEXT' : t.replace('Message','').toUpperCase();
+  }
   return 'UNKNOWN';
 }
-function getText(msg, type) {
-  return msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || msg.message?.videoMessage?.caption || '';
+
+function getText(msg) {
+  const m = msg.message;
+  if (!m) return '';
+  // Unwrap wrappers
+  const inner = m.ephemeralMessage?.message
+    || m.viewOnceMessage?.message
+    || m.viewOnceMessageV2?.message
+    || m.documentWithCaptionMessage?.message
+    || m;
+  return (
+    inner?.conversation
+    || inner?.extendedTextMessage?.text
+    || inner?.imageMessage?.caption
+    || inner?.videoMessage?.caption
+    || inner?.documentMessage?.caption
+    || inner?.buttonsResponseMessage?.selectedButtonId
+    || inner?.listResponseMessage?.singleSelectReply?.selectedRowId
+    || inner?.templateButtonReplyMessage?.selectedId
+    || ''
+  );
 }
 function getQuoted(msg) {
   const ctx = msg.message?.extendedTextMessage?.contextInfo;
