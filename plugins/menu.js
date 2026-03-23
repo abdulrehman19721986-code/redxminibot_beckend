@@ -1,134 +1,84 @@
-/*****************************************************************************
- *                                                                           *
- *                     Developed By Abdul Rehman Rajpoot                     *
- *                     & Muzamil Khan                                        *
- *                                                                           *
- *  🌐  GitHub   : https://github.com/AbdulRehman19721986/redxbot302          *
- *  ▶️  YouTube  : https://youtube.com/@rootmindtech                         *
- *  💬  WhatsApp : https://whatsapp.com/channel/0029VbCPnYf96H4SNehkev10     *
- *  🔗  Telegram : https://t.me/TeamRedxhacker2                              *
- *                                                                           *
- *    © 2026 Abdul Rehman Rajpoot. All rights reserved.                      *
- *                                                                           *
- *****************************************************************************/
-
-const settings = require('../settings');
-const commandHandler = require('../lib/commandHandler');
-const store = require('../lib/lightweight_store');
-const axios = require('axios');
-const { sendInteractiveMessage } = require('gifted-btns');
-
-const MENU_IMAGE_URL = 'https://files.catbox.moe/dfseqs.jpg';
-
+// plugins/menu.js
 module.exports = {
     command: 'menu',
-    aliases: ['help', 'cmd'],
-    category: 'main',
-    description: 'Show main command list and separate quick‑link buttons',
+    aliases: ['help', 'cmds', 'start'],
+    category: 'info',
+    description: 'Show categorized menu with numbers. Reply with number to see commands.',
     usage: '.menu',
-
     async handler(sock, message, args, context) {
-        const { chatId, channelInfo } = context;
+        const { chatId, channelInfo, config } = context;
+        const prefix = config.prefix;
 
-        try {
-            // Get dynamic values from DB (with fallback to settings)
-            const dynamicPrefix = await store.getSetting('global', 'prefix') || settings.prefixes[0];
-            const dynamicBotName = await store.getSetting('global', 'botName') || settings.botName;
-            const dynamicBotDesc = await store.getSetting('global', 'botDesc') || settings.botDesc;
-            const dynamicBotDp = await store.getSetting('global', 'botDp') || settings.botDp;
-
-            // Get runtime
-            const uptimeSeconds = process.uptime();
-            const hours = Math.floor(uptimeSeconds / 3600);
-            const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-            const seconds = Math.floor(uptimeSeconds % 60);
-            const uptimeString = `${hours}h ${minutes}m ${seconds}s`;
-
-            // Get bot mode
-            const botMode = await store.getBotMode();
-
-            // Total commands
-            const totalCommands = commandHandler.commands.size;
-
-            // Build menu text (unchanged)
-            let menuText = `╭┈┄───【 *${dynamicBotName}* 】───┄┈╮\n`;
-            menuText += `├■ 🤖 *Owner:* ${settings.botOwner} & ${settings.secondOwner}\n`;
-            menuText += `├■ 📜 *Commands:* ${totalCommands}\n`;
-            menuText += `├■ ⏱️ *Runtime:* ${uptimeString}\n`;
-            menuText += `├■ 📡 *Baileys:* Multi Device\n`;
-            menuText += `├■ ☁️ *Platform:* ${settings.platform.toUpperCase()}\n`;
-            menuText += `├■ 📦 *Prefix:* ${dynamicPrefix}\n`;
-            menuText += `├■ ⚙️ *Mode:* ${botMode}\n`;
-            menuText += `├■ 🖼️ *Version:* ${settings.version}\n`;
-            menuText += `├■ 📝 *About:* ${dynamicBotDesc}\n`;
-            menuText += `╰───────────────┄┈╯\n\n`;
-
-            // Categories (unchanged)
-            const categories = Array.from(commandHandler.categories.keys()).sort();
-            for (const cat of categories) {
-                const cmdList = commandHandler.getCommandsByCategory(cat);
-                if (cmdList.length === 0) continue;
-
-                menuText += `『 *${cat.toUpperCase()}* 』\n`;
-                menuText += `╭───────────────┄┈╮\n`;
-                cmdList.forEach(cmd => {
-                    menuText += `┋ ➜ *${cmd}*\n`;
-                });
-                menuText += `╰───────────────┄┈╯\n\n`;
-            }
-
-            menuText += `> *© Powered by REDX BOT*`;
-
-            // Fetch image (unchanged)
-            let imageUrl = dynamicBotDp !== 'uploaded via image' ? dynamicBotDp : MENU_IMAGE_URL;
-            let imageBuffer;
-            try {
-                const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 10000 });
-                imageBuffer = Buffer.from(response.data);
-            } catch (err) {
-                console.error('Failed to fetch menu image:', err.message);
-                imageBuffer = null;
-            }
-
-            // Send the main menu (unchanged)
-            await sock.sendMessage(chatId, {
-                image: imageBuffer,
-                caption: menuText,
-                ...channelInfo
-            }, { quoted: message });
-
-            // ==================== SIMPLIFIED QUICK LINKS ====================
-            // Only two buttons: WhatsApp Group and Telegram Group
-            const quickLinkButtons = [
-                {
-                    name: 'cta_url',
-                    buttonParamsJson: JSON.stringify({
-                        display_text: '👥 WhatsApp Group',
-                        url: settings.whatsappGroup || 'https://chat.whatsapp.com/LhSmx2SeXX75r8I2bxsNDo'
-                    })
-                },
-                {
-                    name: 'cta_url',
-                    buttonParamsJson: JSON.stringify({
-                        display_text: '💬 Telegram Group',
-                        url: settings.telegramGroup || 'https://t.me/TeamRedxhacker2'
-                    })
-                }
-            ];
-
-            // Send the quick‑links as a separate interactive message
-            await sendInteractiveMessage(sock, chatId, {
-                text: '🔗 *JOIN OUR COMMUNITIES*\n\nTap the buttons below to join our WhatsApp and Telegram groups.',
-                footer: 'Stay connected!',
-                interactiveButtons: quickLinkButtons
-            }, { quoted: message });
-
-        } catch (error) {
-            console.error('Error in menu command:', error);
-            await sock.sendMessage(chatId, {
-                text: '❌ An error occurred while displaying the menu.',
-                ...channelInfo
-            }, { quoted: message });
+        const cmds = global.botCommands || new Map();
+        const categories = new Map();
+        for (const [name, cmd] of cmds) {
+            const cat = cmd.category || 'other';
+            if (!categories.has(cat)) categories.set(cat, []);
+            categories.get(cat).push(name);
         }
+
+        // Add built‑ins to 'owner' category (they are not in plugins)
+        const builtins = ['ping', 'owner', 'mode', 'deployid', 'runtime', 'restart'];
+        for (const cmd of builtins) {
+            if (!cmds.has(cmd)) {
+                if (!categories.has('owner')) categories.set('owner', []);
+                categories.get('owner').push(cmd);
+            }
+        }
+
+        const sortedCats = [...categories.keys()].sort();
+        let menu = `╭┈───〔 ${config.botName || 'REDXBOT302'} 〕───⊷\n`;
+        menu += `├▢ 🤖 Owner: ${config.ownerName}\n`;
+        menu += `├▢ 🪄 Prefix: ${prefix}\n`;
+        menu += `├▢ 🎐 Version: 6.0.0\n`;
+        menu += `├▢ ☁️ Platform: ${config.platform || 'Local'}\n`;
+        menu += `├▢ 📜 Plugins: ${cmds.size + builtins.length}\n`;
+        menu += `├▢ ⏰ Runtime: ${formatUptime(process.uptime())}\n`;
+        menu += `╰───────────────────⊷\n`;
+        menu += `╭───⬡ SELECT MENU ⬡───\n`;
+
+        let index = 1;
+        for (const cat of sortedCats) {
+            const count = categories.get(cat).length;
+            menu += `┋ ⬡ ${index} ${cat.toUpperCase()} (${count})\n`;
+            index++;
+        }
+        menu += `╰───────────────────⊷\n\n`;
+        menu += `> *Reply with the number to select menu (1-${sortedCats.length})*`;
+
+        const sentMsg = await sock.sendMessage(chatId, { text: menu, ...channelInfo }, { quoted: message });
+        const msgId = sentMsg.key.id;
+
+        const listener = async (update) => {
+            const msg = update.messages?.[0];
+            if (!msg?.message) return;
+            const replyTo = msg.message.extendedTextMessage?.contextInfo?.stanzaId;
+            if (replyTo !== msgId) return;
+
+            const choice = parseInt((msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim());
+            if (isNaN(choice) || choice < 1 || choice > sortedCats.length) {
+                await sock.sendMessage(chatId, { text: '❌ Invalid number. Please send a number between 1 and ' + sortedCats.length, ...channelInfo }, { quoted: msg });
+                return;
+            }
+
+            sock.ev.off('messages.upsert', listener);
+            const selectedCat = sortedCats[choice - 1];
+            const commandsList = categories.get(selectedCat).sort();
+            let catText = `『 ${selectedCat.toUpperCase()} 』\n╭───────────────┄┈╮\n`;
+            commandsList.forEach(cmd => { catText += `┋ ➜ ${prefix}${cmd}\n`; });
+            catText += `╰───────────────┄┈╯`;
+
+            await sock.sendMessage(chatId, { text: catText, ...channelInfo }, { quoted: msg });
+        };
+
+        sock.ev.on('messages.upsert', listener);
+        setTimeout(() => sock.ev.off('messages.upsert', listener), 60 * 1000);
     }
 };
+
+function formatUptime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h}h ${m}m ${s}s`;
+}

@@ -7,11 +7,9 @@
 'use strict';
 
 const { getBuffer, runtime, formatBytes } = require('../lib/functions');
-const { fetchJson }  = require('../lib/functions2');
 const fakevCard = require('../lib/fakevcard');
 const os        = require('os');
 const crypto    = require('crypto');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 const BOT_NAME   = process.env.BOT_NAME   || '🔥 REDXBOT302 🔥';
 const OWNER_NAME = process.env.OWNER_NAME || 'Abdul Rehman Rajpoot';
@@ -30,7 +28,7 @@ module.exports = [
   // ── CALCULATOR ─────────────────────────────────────────
   {
     pattern: 'ucalc',
-
+    alias: ['calculate', 'math', 'eval'],
     desc: 'Calculate a math expression',
     category: 'Utility',
     react: '🧮',
@@ -61,7 +59,7 @@ module.exports = [
   // ── QR CODE ────────────────────────────────────────────
   {
     pattern: 'uqr',
-    alias: ['makeqr'],
+    alias: ['qrcode', 'makeqr'],
     desc: 'Generate a QR code from text/URL',
     category: 'Utility',
     react: '📷',
@@ -99,9 +97,11 @@ module.exports = [
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const imgMsg    = quotedMsg?.imageMessage || msg.message?.imageMessage;
         if (!imgMsg) return reply('❌ Please reply to a QR code image.');
+        const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
         const stream = await downloadContentFromMessage(imgMsg, 'image');
         let buf = Buffer.alloc(0);
         for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
+        const { default: FormData } = await import('form-data');
         // We can't easily decode without external API, just respond accordingly
         await send(conn, from, '⚠️ QR reading requires a server-side decoder. Try uploading to: https://zxing.org/w/decode.jspx\n\n> 🔥 ' + BOT_NAME);
         await conn.sendMessage(from, { react: { text: '⚠️', key: msg.key } });
@@ -114,7 +114,7 @@ module.exports = [
   // ── UPTIME ─────────────────────────────────────────────
   {
     pattern: 'uuptime',
-
+    alias: ['alive', 'runtime'],
     desc: 'Check bot uptime',
     category: 'Utility',
     react: '⏱️',
@@ -137,7 +137,7 @@ module.exports = [
   // ── SYS INFO ───────────────────────────────────────────
   {
     pattern: 'usysinfo',
-    alias: ['serverinfo'],
+    alias: ['system', 'serverinfo'],
     desc: 'Show server/system info',
     category: 'Utility',
     react: '💻',
@@ -248,7 +248,7 @@ module.exports = [
   // ── SHORTURL ───────────────────────────────────────────
   {
     pattern: 'short',
-    alias: ['tinyurl'],
+    alias: ['shorturl', 'tinyurl'],
     desc: 'Shorten a URL',
     category: 'Utility',
     react: '🔗',
@@ -257,6 +257,7 @@ module.exports = [
       if (!q || !q.startsWith('http')) return reply('❌ Provide a valid URL.\n*Usage:* .short <url>');
       await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
       try {
+        const { fetchJson } = require('../lib/functions2');
         const result = await fetchJson(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(q)}`);
         await send(conn, from,
 `╔══════[ *URL Shortener* ]══════╗

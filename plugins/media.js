@@ -8,9 +8,6 @@
 const { fetchJson } = require('../lib/functions2');
 const { getRandom } = require('../lib/functions');
 const fakevCard     = require('../lib/fakevcard');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const FormData      = require('form-data');
-const axios         = require('axios');
 
 const BOT_NAME       = process.env.BOT_NAME       || '🔥 REDXBOT302 🔥';
 const NEWSLETTER_JID = process.env.NEWSLETTER_JID || '120363405513439052@newsletter';
@@ -37,6 +34,7 @@ module.exports = [
 
         // Use scraping approach — Bing image search
         const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(q)}&first=1`;
+        const axios   = require('axios');
         const html    = await axios.get(bingUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
           timeout: 15000,
@@ -187,9 +185,13 @@ ${stats}
         if (!target) return reply('❌ Reply to an image with *.removebg*');
 
         await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
+        const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
         const stream = await downloadContentFromMessage(target, 'image');
         let buf = Buffer.alloc(0);
         for await (const c of stream) buf = Buffer.concat([buf, c]);
+
+        const FormData = require('form-data');
+        const axios    = require('axios');
         const form     = new FormData();
         form.append('image_file', buf, { filename: 'img.jpg', contentType: 'image/jpeg' });
         form.append('size', 'auto');
