@@ -1,150 +1,95 @@
-/**
- * REDXBOT302 — Status & Profile Plugin
- * Commands: setstatus, setname, getpp, tagstatus
- * Owner: Abdul Rehman Rajpoot
- */
-
-'use strict';
+/*****************************************************************************
+ *                                                                           *
+ *                     Developed By Abdul Rehman Rajpoot                     *
+ *                     & Muzamil Khan                                        *
+ *                                                                           *
+ *****************************************************************************/
 
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const fakevCard = require('../lib/fakevcard');
 
-const BOT_NAME   = process.env.BOT_NAME   || '🔥 REDXBOT302 🔥';
-const OWNER_NAME = process.env.OWNER_NAME || 'Abdul Rehman Rajpoot';
-const OWNER_NUM  = process.env.OWNER_NUMBER || '923009842133';
-const NL_JID     = process.env.NEWSLETTER_JID || '120363405513439052@newsletter';
+module.exports = {
+    command: 'status',
+    aliases: ['story', 'updatestatus'],
+    category: 'owner',
+    description: 'Post a status update (text/photo/video)',
+    usage: '.status <text>  or  reply to an image/video with .status',
+    ownerOnly: true,
 
-const ctxInfo = () => ({
-  forwardingScore: 999, isForwarded: true,
-  forwardedNewsletterMessageInfo: { newsletterJid: NL_JID, newsletterName: `🔥 ${BOT_NAME}`, serverMessageId: 200 },
-});
+    async handler(sock, message, args, context) {
+        const chatId = context.chatId || message.key.remoteJid;
+        const channelInfo = context.channelInfo || {};
 
-const isOwner = (sender) =>
-  sender.split('@')[0].split(':')[0] === OWNER_NUM ||
-  sender.split('@')[0].split(':')[0] === (process.env.CO_OWNER_NUM || '923183928892');
+        const quotedMsg = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const isImage = quotedMsg?.imageMessage;
+        const isVideo = quotedMsg?.videoMessage;
 
-module.exports = [
+        // ==================== TEXT STATUS ====================
+        if (!isImage && !isVideo) {
+            if (args.length === 0) {
+                return await sock.sendMessage(chatId, {
+                    text: '❌ Provide text or reply to an image/video.\n\nUsage:\n`.status Hello world!`\nor reply to an image/video with `.status`',
+                    ...channelInfo
+                }, { quoted: message });
+            }
 
-  // ── SET STATUS ─────────────────────────────────────────
-  {
-    pattern: 'setstatus',
-    alias: ['setbio'],
-    desc: 'Set bot WhatsApp about/status (Owner only)',
-    category: 'Owner',
-    react: '📝',
-    use: '.setstatus <text>',
-    execute: async (conn, msg, m, { from, q, sender, reply }) => {
-      if (!isOwner(sender)) return reply('❌ Owner only command.');
-      if (!q) return reply('❌ Provide a status text.');
-      try {
-        await conn.updateProfileStatus(q);
-        await conn.sendMessage(from, { text: `✅ *Status Updated!*\n\n📝 "${q}"\n\n> 🔥 ${BOT_NAME}`, contextInfo: ctxInfo() }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch (e) {
-        return reply(`❌ Failed: ${e.message}`);
-      }
-    },
-  },
+            const text = args.join(' ');
+            try {
+                console.log('[STATUS] Attempting to post text status...');
+                // Method 1: standard sendMessage
+                const sent = await sock.sendMessage('status@broadcast', { text });
+                console.log('[STATUS] sendMessage result:', sent ? 'OK' : 'FAILED');
 
-  // ── SET BOT NAME ───────────────────────────────────────
-  {
-    pattern: 'stsetbotname',
-    alias: ['setname'],
-    desc: 'Set bot profile name (Owner only)',
-    category: 'Owner',
-    react: '✏️',
-    use: '.setbotname <name>',
-    execute: async (conn, msg, m, { from, q, sender, reply }) => {
-      if (!isOwner(sender)) return reply('❌ Owner only command.');
-      if (!q) return reply('❌ Provide a name.');
-      try {
-        await conn.updateProfileName(q);
-        await conn.sendMessage(from, { text: `✅ *Bot Name Updated!*\n\n👤 "${q}"\n\n> 🔥 ${BOT_NAME}`, contextInfo: ctxInfo() }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch (e) {
-        return reply(`❌ Failed: ${e.message}`);
-      }
-    },
-  },
+                // Confirm to user
+                await sock.sendMessage(chatId, { 
+                    text: '✅ Status posted!', 
+                    ...channelInfo 
+                }, { quoted: message });
+            } catch (e) {
+                console.error('[STATUS] Error posting text:', e);
+                await sock.sendMessage(chatId, { 
+                    text: `❌ Error: ${e.message}`, 
+                    ...channelInfo 
+                }, { quoted: message });
+            }
+            return;
+        }
 
-  // ── SET BOT DP ────────────────────────────────────────
-  {
-    pattern: 'stsetbotdp',
-    alias: ['setpp', 'setdp'],
-    desc: 'Set bot profile picture (reply to image, Owner only)',
-    category: 'Owner',
-    react: '🖼️',
-    use: '<reply to image> .setbotdp',
-    execute: async (conn, msg, m, { from, sender, reply }) => {
-      if (!isOwner(sender)) return reply('❌ Owner only command.');
-      const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-      const imgMsg    = quotedMsg?.imageMessage || msg.message?.imageMessage;
-      if (!imgMsg) return reply('❌ Reply to an image to set as bot DP.');
-      await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-      try {
-        const stream = await downloadContentFromMessage(imgMsg, 'image');
-        let buf = Buffer.alloc(0);
-        for await (const chunk of stream) buf = Buffer.concat([buf, chunk]);
-        await conn.updateProfilePicture(conn.user.id, buf);
-        await conn.sendMessage(from, { text: `✅ *Bot DP Updated!*\n\n> 🔥 ${BOT_NAME}`, contextInfo: ctxInfo() }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch (e) {
-        await conn.sendMessage(from, { react: { text: '❌', key: msg.key } });
-        return reply(`❌ Failed to set DP: ${e.message}`);
-      }
-    },
-  },
+        // ==================== MEDIA STATUS ====================
+        try {
+            const mediaType = isImage ? 'image' : 'video';
+            const msg = isImage ? quotedMsg.imageMessage : quotedMsg.videoMessage;
 
-  // ── GET PP ────────────────────────────────────────────
-  {
-    pattern: 'stgetpp',
-    alias: ['pp', 'pfp', 'profilepic'],
-    desc: 'Get profile picture of a user',
-    category: 'Utility',
-    react: '🖼️',
-    use: '.getpp @user or reply to message',
-    execute: async (conn, msg, m, { from, reply }) => {
-      const target = m.mentionedJid?.[0] || m.quoted?.sender || msg.key.remoteJid;
-      await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-      try {
-        const ppUrl = await conn.profilePictureUrl(target, 'image');
-        await conn.sendMessage(from, {
-          image: { url: ppUrl },
-          caption: `🖼️ *Profile Picture*\n\n👤 @${target.split('@')[0]}\n\n> 🔥 ${BOT_NAME}`,
-          mentions: [target],
-          contextInfo: ctxInfo(),
-        }, { quoted: fakevCard });
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-      } catch {
-        await conn.sendMessage(from, { react: { text: '❌', key: msg.key } });
-        return reply('❌ No profile picture found or user has privacy settings enabled.');
-      }
-    },
-  },
+            console.log(`[STATUS] Downloading ${mediaType}...`);
+            const stream = await downloadContentFromMessage(msg, mediaType);
+            const buffer = [];
+            for await (const chunk of stream) {
+                buffer.push(chunk);
+            }
+            const mediaBuffer = Buffer.concat(buffer);
+            console.log(`[STATUS] Downloaded ${mediaBuffer.length} bytes`);
 
-  // ── VCARD ─────────────────────────────────────────────
-  {
-    pattern: 'vcard',
-    alias: ['contact', 'vcf'],
-    desc: 'Send bot owner contact card',
-    category: 'Utility',
-    react: '📇',
-    use: '.vcard',
-    execute: async (conn, msg, m, { from }) => {
-      await conn.sendMessage(from, {
-        contacts: {
-          displayName: `${BOT_NAME} — ${OWNER_NAME}`,
-          contacts: [
-            {
-              vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${OWNER_NAME}\nORG:REDXBOT302 Team;\nTEL;type=CELL;type=VOICE;waid=${OWNER_NUM}:+${OWNER_NUM}\nEND:VCARD`,
-            },
-            {
-              vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:Muzamil Khan (Co-Owner)\nORG:REDXBOT302 Team;\nTEL;type=CELL;type=VOICE;waid=${process.env.CO_OWNER_NUM || '923183928892'}:+${process.env.CO_OWNER_NUM || '923183928892'}\nEND:VCARD`,
-            },
-          ],
-        },
-      }, { quoted: msg });
-      await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-    },
-  },
-];
+            const statusContent = {};
+            if (isImage) {
+                statusContent.image = mediaBuffer;
+            } else {
+                statusContent.video = mediaBuffer;
+            }
+            if (msg.caption) statusContent.caption = msg.caption;
+
+            console.log('[STATUS] Sending to status@broadcast...');
+            const sent = await sock.sendMessage('status@broadcast', statusContent);
+            console.log('[STATUS] sendMessage result:', sent ? 'OK' : 'FAILED');
+
+            await sock.sendMessage(chatId, { 
+                text: '✅ Status posted successfully!', 
+                ...channelInfo 
+            }, { quoted: message });
+        } catch (e) {
+            console.error('[STATUS] Error posting media:', e);
+            await sock.sendMessage(chatId, { 
+                text: `❌ Failed to post status: ${e.message}`, 
+                ...channelInfo 
+            }, { quoted: message });
+        }
+    }
+};
