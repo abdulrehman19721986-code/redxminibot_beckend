@@ -9,14 +9,27 @@
     "start:clean": "node cleanup.js && npm start",
     "start:heroku": "node --max-old-space-size=460 --optimize-for-size --expose-gc index.js"
   },
-  "keywords": ["whatsapp-bot", "baileys", "redxbot", "ultra"],
+  "keywords": [
+    "whatsapp-bot",
+    "baileys",
+    "redxbot",
+    "ultra"
+  ],
   "author": "Abdul Rehman Rajpoot",
   "contributors": [
-    { "name": "Abdul Rehman Rajpoot", "role": "Lead Developer" },
-    { "name": "Muzamil Khan", "role": "Co-Developer" }
+    {
+      "name": "Abdul Rehman Rajpoot",
+      "role": "Lead Developer"
+    },
+    {
+      "name": "Muzamil Khan",
+      "role": "Co-Developer"
+    }
   ],
   "license": "MIT",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
     "@distube/ytdl-core": "^4.15.8",
     "@hapi/boom": "^10.0.1",
@@ -47,7 +60,6 @@
     "moment-timezone": "^0.5.43",
     "node-cache": "^5.1.2",
     "node-fetch": "^2.7.0",
-    "node-gtts": "^0.0.2",
     "node-id3": "^0.2.6",
     "node-webpmux": "^3.1.0",
     "pino": "^8.0.0",
@@ -72,5 +84,7 @@
       "node-webpmux": "$node-webpmux"
     }
   },
-  "config": { "cache": "/tmp/npmcache" }
+  "config": {
+    "cache": "/tmp/npmcache"
+  }
 }
