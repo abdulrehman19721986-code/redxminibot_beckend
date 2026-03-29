@@ -13,11 +13,11 @@
  *****************************************************************************/
 
 module.exports = {
-    command: 'broadcast',
-    aliases: ['bc', 'announce'],
+    command: 'broadcastdm',
+    aliases: ['bcdm', 'announcedm', 'dmall'],
     category: 'owner',
-    description: 'Broadcast a message to all groups the bot is in',
-    usage: '.broadcast <message>',
+    description: 'Broadcast a message to all saved DM contacts',
+    usage: '.broadcastdm <message>',
     ownerOnly: true,
 
     async handler(sock, message, args, context = {}) {
@@ -28,38 +28,41 @@ module.exports = {
 
         if (!text) {
             return await sock.sendMessage(chatId, {
-                text: `*📢 BROADCAST*\n\n*Usage:* .broadcast <message>\n\n*Example:*\n.broadcast Hello everyone! Bot will be down for maintenance at 10 PM.\n\n_Sends to all groups the bot is in. Has a 1 second delay between each group to avoid ban._`,
+                text: `*📩 BROADCAST DM*\n\n*Usage:* .broadcastdm <message>\n\n*Example:*\n.broadcastdm Hey! Check out our new features!\n\n_Sends to all contacts in the bot's contact list. Has a 1.5s delay between each to avoid ban._`,
                 ...channelInfo
             }, { quoted: message });
         }
 
-        let groups = [];
+        let contacts = [];
         try {
-            const allChats = Object.keys(sock.store?.chats || {});
-            groups = allChats.filter(jid => jid.endsWith('@g.us'));
+            const allContacts = Object.keys(sock.store?.contacts || {});
+            contacts = allContacts.filter(jid =>
+                jid.endsWith('@s.whatsapp.net') &&
+                jid !== sock.user?.id
+            );
         } catch (e) {
-            console.error('[BROADCAST] Error getting groups:', e.message);
+            console.error('[BROADCASTDM] Error getting contacts:', e.message);
         }
 
-        if (groups.length === 0) {
+        if (contacts.length === 0) {
             return await sock.sendMessage(chatId, {
-                text: '❌ No groups found. Make sure the bot is in at least one group.',
+                text: '❌ No contacts found in the bot\'s contact list.',
                 ...channelInfo
             }, { quoted: message });
         }
 
         await sock.sendMessage(chatId, {
-            text: `📢 *Broadcasting to ${groups.length} group(s)...*\n\nThis may take a moment.`,
+            text: `📩 *Broadcasting to ${contacts.length} contact(s)...*\n\nThis may take a moment.`,
             ...channelInfo
         }, { quoted: message });
 
-        const broadcastText = `📢 *BROADCAST MESSAGE*\n\n${text}`;
+        const broadcastText = `📩 *MESSAGE*\n\n${text}`;
         let sent = 0;
         let failed = 0;
 
-        for (const groupJid of groups) {
+        for (const contactJid of contacts) {
             try {
-                await sock.sendMessage(groupJid, {
+                await sock.sendMessage(contactJid, {
                     text: broadcastText,
                     contextInfo: {
                         forwardingScore: 1,
@@ -73,14 +76,14 @@ module.exports = {
                 });
                 sent++;
             } catch (e) {
-                console.error(`[BROADCAST] Failed to send to ${groupJid}: ${e.message}`);
+                console.error(`[BROADCASTDM] Failed to send to ${contactJid}: ${e.message}`);
                 failed++;
             }
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500));
         }
 
         await sock.sendMessage(chatId, {
-            text: `✅ *Broadcast Complete!*\n\n📤 Sent: ${sent}\n❌ Failed: ${failed}\n📊 Total: ${groups.length}`,
+            text: `✅ *DM Broadcast Complete!*\n\n📤 Sent: ${sent}\n❌ Failed: ${failed}\n📊 Total: ${contacts.length}`,
             ...channelInfo
         }, { quoted: message });
     }
